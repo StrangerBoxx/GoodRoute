@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Variante A — Torre de control · Control Position</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #FBF6F6; }
+    #volver {
+      position: fixed; left: 14px; bottom: 14px; z-index: 200;
+      font: 500 12.5px/1 "IBM Plex Sans", system-ui, sans-serif;
+      background: #fff; color: #635f60; border: 1px solid #e0d6d6;
+      border-radius: 20px; padding: 8px 14px; text-decoration: none;
+      box-shadow: 0 2px 8px rgba(40,30,30,.08);
+    }
+    #volver:hover { color: #033E84; border-color: #cfc4c4; }
+    #cargador {
+      position: fixed; inset: 0; display: grid; place-items: center;
+      font: 500 13px "IBM Plex Sans", system-ui, sans-serif; color: #938d8e;
+      background: #FBF6F6;
+    }
+  </style>
+</head>
+<body>
+  <div id="cargador">Cargando el prototipo…</div>
+  <div id="root"></div>
+  <a id="volver" href="../index.html">&larr; Todas las versiones</a>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js" crossorigin="anonymous"></script>
+  <!-- El UMD de lucide-react busca la global en minúscula. -->
+  <script>window.react = window.React;</script>
+  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/lucide-react@0.383.0/dist/umd/lucide-react.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+  <script type="text/babel" data-presets="react" src="./app/v1-A.jsx"></script>
+  <script>
+    // El cargador se retira cuando el prototipo terminó de montarse.
+    new MutationObserver(function (m, obs) {
+      if (document.getElementById("root").children.length) {
+        var c = document.getElementById("cargador");
+        if (c) c.remove();
+        obs.disconnect();
+      }
+    }).observe(document.getElementById("root"), { childList: true });
+  </script>
+</body>
+</html>

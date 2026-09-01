@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Prototipos · Control Position</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg:#FBF6F6; --surface:#fff; --surface2:#f8f3f3;
+  --border:#ece4e4; --border2:#e0d6d6; --border3:#cfc4c4;
+  --text:#1c1a1b; --text2:#635f60; --text3:#938d8e; --text4:#b6afaf;
+  --accent:#033E84; --accent-soft:#e3ebf5; --accent-strong:#022c5f;
+  --green-bg:#e0f0e6; --green-fg:#1c6e44;
+  --amber-bg:#fbefd6; --amber-fg:#8a5d11;
+  --slate-bg:#e9ecef; --slate-fg:#4c5763;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  background:var(--bg);color:var(--text);font-size:14px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:900px;margin:0 auto;padding:56px 28px 80px}
+
+header .marca{font-size:15px;font-weight:700;letter-spacing:-.3px;line-height:1.05;color:var(--accent)}
+header h1{font-size:28px;font-weight:650;letter-spacing:-.6px;margin-top:22px}
+header p{color:var(--text2);font-size:14.5px;margin-top:8px;max-width:60ch;line-height:1.55}
+
+.entrega{margin-top:44px}
+.entrega-head{display:flex;align-items:baseline;gap:12px;padding-bottom:10px;border-bottom:1px solid var(--border2)}
+.entrega-head h2{font-size:17px;font-weight:620;letter-spacing:-.2px}
+.entrega-head .meta{font-size:12.5px;color:var(--text3)}
+.entrega-head .fecha{margin-left:auto;font-size:12.5px;color:var(--text3)}
+.hu{font-size:13px;color:var(--text2);margin-top:12px;max-width:64ch;line-height:1.55}
+
+.lista{margin-top:16px;display:flex;flex-direction:column;gap:10px}
+.item{
+  display:flex;align-items:center;gap:16px;
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:16px 18px;transition:border-color .12s,box-shadow .12s;
+}
+.item:hover{border-color:var(--border3);box-shadow:0 2px 8px rgba(40,30,30,.06)}
+.item .letra{
+  width:34px;height:34px;flex:none;border-radius:9px;
+  background:var(--accent-soft);color:var(--accent);
+  display:grid;place-items:center;font-weight:700;font-size:14px;
+}
+.item .cuerpo{min-width:0;flex:1}
+.item .titulo{font-size:14px;font-weight:620}
+.item .resumen{font-size:12.5px;color:var(--text2);margin-top:3px;line-height:1.5}
+.item .ir{font-size:12.5px;font-weight:600;color:var(--accent);white-space:nowrap}
+
+.tag{
+  display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;
+  padding:3px 9px;border-radius:7px;white-space:nowrap;
+}
+.t-revision{background:var(--amber-bg);color:var(--amber-fg)}
+.t-aprobada{background:var(--green-bg);color:var(--green-fg)}
+.t-archivada{background:var(--slate-bg);color:var(--slate-fg)}
+
+footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--border);color:var(--text3);font-size:12.5px;line-height:1.6}
+footer code{background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:1px 5px;font-size:12px}
+
+@media (max-width:620px){
+  .wrap{padding:36px 18px 60px}
+  .item{flex-wrap:wrap}
+  .item .ir{margin-left:50px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="marca">CONTROL<br>POSITION</div>
+    <h1>Prototipos navegables</h1>
+    <p>Versiones publicadas para revisar en equipo. Cada una abre en pantalla completa y funciona sola: no hay backend detrás, los datos son simulados salvo que la propia pantalla diga lo contrario.</p>
+  </header>
+
+  <div id="entregas"></div>
+
+  <footer>
+    Para agregar una versión, sumá una entrada al array <code>VERSIONES</code> al final de este archivo y subí el HTML correspondiente. No hace falta tocar nada más.
+  </footer>
+</div>
+
+<script>
+/* ==========================================================================
+   ÚNICO PUNTO DE EDICIÓN
+   Agregá acá cada versión nueva. Las entregas se ordenan de más reciente a
+   más antigua según el orden de este array.
+   estado: "revision" | "aprobada" | "archivada"
+   ========================================================================== */
+const VERSIONES = [
+  {
+    entrega: "Sprint 2 · HU-12",
+    titulo: "Dashboard de análisis",
+    fecha: "01/06/2026",
+    historia: "Como supervisor, quiero visualizar los indicadores de asignación en el tiempo, para evaluar si esta información me sirve para tomar decisiones.",
+    nota: "Tres hipótesis de diseño sobre los mismos diez indicadores. La idea es que el supervisor diga cuál le sirve, no que elija la más linda.",
+    prototipos: [
+      { letra: "A", titulo: "Torre de control",
+        resumen: "Tarjetas KPI arriba, gráfico del indicador elegido y tabla por técnico. Para chequear el estado del día.",
+        archivo: "hu-12-dashboard/v1-A-torre-de-control.html", estado: "revision" },
+      { letra: "B", titulo: "Por dominio",
+        resumen: "Pestañas por grupo de indicadores, cada uno con su lectura en una línea. Para investigar un problema concreto.",
+        archivo: "hu-12-dashboard/v1-B-por-dominio.html", estado: "revision" },
+      { letra: "C", titulo: "Evolución comparada",
+        resumen: "Los diez indicadores como mini-gráficos del mismo tamaño; clic para abrir el detalle. Para leer tendencias y correlaciones.",
+        archivo: "hu-12-dashboard/v1-C-evolucion-comparada.html", estado: "revision" },
+    ],
+  },
+];
+
+const ETIQUETA = {
+  revision: ["En revisión", "t-revision"],
+  aprobada: ["Aprobada", "t-aprobada"],
+  archivada: ["Archivada", "t-archivada"],
+};
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+document.getElementById("entregas").innerHTML = VERSIONES.map((e) => `
+  <section class="entrega">
+    <div class="entrega-head">
+      <h2>${esc(e.titulo)}</h2>
+      <span class="meta">${esc(e.entrega)}</span>
+      <span class="fecha">${esc(e.fecha)}</span>
+    </div>
+    ${e.historia ? `<p class="hu">${esc(e.historia)}</p>` : ""}
+    ${e.nota ? `<p class="hu" style="color:var(--text3)">${esc(e.nota)}</p>` : ""}
+    <div class="lista">
+      ${e.prototipos.map((p) => {
+        const [texto, clase] = ETIQUETA[p.estado] || ETIQUETA.revision;
+        return `
+        <a class="item" href="${esc(p.archivo)}">
+          <span class="letra">${esc(p.letra)}</span>
+          <span class="cuerpo">
+            <span class="titulo">${esc(p.titulo)}</span>
+            <span class="resumen">${esc(p.resumen)}</span>
+          </span>
+          <span class="tag ${clase}">${texto}</span>
+          <span class="ir">Abrir</span>
+        </a>`;
+      }).join("")}
+    </div>
+  </section>
+`).join("");
+</script>
+</body>
+</html>
