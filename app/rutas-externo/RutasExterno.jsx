@@ -18,21 +18,6 @@
    congelado; cuando exista, solo data.js debería cambiar.
    ============================================================ */
 
-function RutasExternoNavItem({ active, onClick }) {
-  return (
-    <a
-      className={"nav-item nav-external" + (active ? " active" : "")}
-      href="#"
-      onClick={e => { e.preventDefault(); onClick(); }}
-      title="Módulo de asignación de rutas (equipo externo) — maqueta Sprint 1"
-    >
-      <Icon name="pin" />
-      Asignar rutas
-      <span className="nav-ext-ico"><Icon name="external" /></span>
-    </a>
-  );
-}
-
 /* ---- sessionStorage: selección, propuesta y confirmación del día ---- */
 const RX_KEYS = {
   fecha: "rutasExterno.fecha",
@@ -587,4 +572,4 @@ function RutasExternoScreen({ onToast }) {
   );
 }
 
-Object.assign(window, { RutasExternoNavItem, RutasExternoScreen });
+Object.assign(window, { RutasExternoScreen });

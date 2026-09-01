@@ -1,4 +1,34 @@
 /* ============ Sidebar + Top header ============ */
+// Apunta a la galería de prototipos mientras el supervisor elige la variante
+// definitiva de dashboard; cuando la elija, alcanza con cambiar esta URL.
+const GOODROUTE_DASHBOARD_URL = "https://strangerboxx.github.io/MVP-prototipo-cp/prototipos/";
+
+function GoodRouteNavGroup({ active, onNavigate }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="nav-group">
+      <button type="button" className="nav-group-toggle" aria-expanded={open} onClick={() => setOpen(o => !o)}>
+        <Icon name="zap" />
+        GoodRoute
+        <span className={"nav-group-chev" + (open ? " open" : "")}><Icon name="chevD" /></span>
+      </button>
+      {open && (
+        <div className="nav-group-children">
+          <button type="button" className={"nav-item" + (active ? " active" : "")} onClick={onNavigate}>
+            <Icon name="pin" />
+            Asignar rutas
+          </button>
+          <a className="nav-item" href={GOODROUTE_DASHBOARD_URL} target="_blank" rel="noopener">
+            <Icon name="dashboard" />
+            Galería de dashboards
+            <span className="nav-ext-ico"><Icon name="external" /></span>
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Sidebar({ route, go, counts }) {
   const opItems = [
     { id: "dashboard", label: "Centro de control", icon: "dashboard" },
@@ -23,7 +53,7 @@ function Sidebar({ route, go, counts }) {
           {it.count != null && it.count > 0 && <span className={"nav-count" + (it.alert ? " alert" : "")}>{it.count}</span>}
         </button>
       ))}
-      <RutasExternoNavItem active={route.screen === "rutasExterno"} onClick={() => go("rutasExterno")} />
+      <GoodRouteNavGroup active={route.screen === "rutasExterno"} onNavigate={() => go("rutasExterno")} />
 
       <div className="nav-group-label">Ajustes</div>
       <button className={"nav-item" + (route.screen === "settings" ? " active" : "")} onClick={() => go("settings")}>
