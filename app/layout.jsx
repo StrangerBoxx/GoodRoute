@@ -1,7 +1,5 @@
 /* ============ Sidebar + Top header ============ */
-const GOODROUTE_DASHBOARD_URL = "https://strangerboxx.github.io/MVP-prototipo-cp/prototipos/hu-12-dashboard/v2-dashboard-analisis.html";
-
-function GoodRouteNavGroup({ active, onNavigate }) {
+function GoodRouteNavGroup({ route, go }) {
   const [open, setOpen] = useState(true);
   return (
     <div className="nav-group">
@@ -12,15 +10,14 @@ function GoodRouteNavGroup({ active, onNavigate }) {
       </button>
       {open && (
         <div className="nav-group-children">
-          <button type="button" className={"nav-item" + (active ? " active" : "")} onClick={onNavigate}>
+          <button type="button" className={"nav-item" + (route.screen === "rutasExterno" ? " active" : "")} onClick={() => go("rutasExterno")}>
             <Icon name="pin" />
             Asignar rutas
           </button>
-          <a className="nav-item" href={GOODROUTE_DASHBOARD_URL} target="_blank" rel="noopener">
+          <button type="button" className={"nav-item" + (route.screen === "analisis" ? " active" : "")} onClick={() => go("analisis")}>
             <Icon name="dashboard" />
             Dashboard
-            <span className="nav-ext-ico"><Icon name="external" /></span>
-          </a>
+          </button>
         </div>
       )}
     </div>
@@ -51,7 +48,7 @@ function Sidebar({ route, go, counts }) {
           {it.count != null && it.count > 0 && <span className={"nav-count" + (it.alert ? " alert" : "")}>{it.count}</span>}
         </button>
       ))}
-      <GoodRouteNavGroup active={route.screen === "rutasExterno"} onNavigate={() => go("rutasExterno")} />
+      <GoodRouteNavGroup route={route} go={go} />
 
       <div className="nav-group-label">Ajustes</div>
       <button className={"nav-item" + (route.screen === "settings" ? " active" : "")} onClick={() => go("settings")}>

@@ -1,23 +1,28 @@
 /* ==========================================================================
-   PREÁMBULO PARA PUBLICACIÓN EN GITHUB PAGES
+   Dashboard de análisis — HU-12 (Sprint 2)
    --------------------------------------------------------------------------
-   Este archivo corre en el navegador sin compilar: Babel standalone lo
-   traduce en caliente y las librerías llegan como globales UMD.
+   Pantalla real del backoffice: vive en el routing de app/main.jsx
+   (route.screen === "analisis"), montada dentro del Sidebar/TopBar de
+   siempre. Es la variante A ("Torre de control") con el diseño que el
+   supervisor terminó aprobando después de dos rondas de feedback:
+   botonera de categorías (con un tab "Todos" al final) en vez de una
+   grilla plana, y sin comparación contra el período anterior.
 
-   Si le pedís a Claude que regenere esta variante, conservá ESTE bloque y
-   reemplazá sólo lo que viene después. No agregues sentencias import.
+   Esta es la ÚNICA copia conectada al proyecto — la fuente de verdad para
+   cualquier cambio futuro del dashboard. prototipos/hu-12-dashboard/ (A, B
+   y C) queda congelado como registro de la revisión que llevó a este
+   diseño; no se vuelve a tocar ni se vuelve a sincronizar desde ahí.
+
+   Sin bundler: Recharts y pdfmake llegan como globales UMD (agregados en
+   index.html). Los íconos usan el registro compartido de app/ui.jsx, no
+   lucide-react, y los colores salen de las variables CSS de app/styles.css
+   en vez de una paleta propia, para heredar el tema (incluyendo los
+   Tweaks de Marca).
    ========================================================================== */
-const { useState, useMemo, useEffect, useRef } = React;
 const {
-  ResponsiveContainer, LineChart, Line, AreaChart, Area, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ReferenceArea, ReferenceLine
+  ResponsiveContainer, AreaChart, Area,
+  XAxis, YAxis, CartesianGrid, Tooltip, ReferenceArea,
 } = Recharts;
-const {
-  Zap, MapPin, LayoutGrid, ClipboardList, Users, Wrench, Settings, Search,
-  ChevronDown, ChevronRight, Info,
-  AlertTriangle, RefreshCw, Inbox, ArrowUpDown, X, Loader2, Download
-} = LucideReact;
-
 
 /* ==========================================================================
    1. INTERRUPTOR DE HONESTIDAD DEL DATO
@@ -169,20 +174,16 @@ const GRUPOS = [
 
 /* ==========================================================================
    3. MAESTROS DE FILTRO
+   --------------------------------------------------------------------------
+   El técnico y la zona salen del padrón real del backoffice (CP_DATA.tecnicos),
+   no de una lista aparte, para que el filtro muestre gente real del sistema.
    ========================================================================== */
-const TECNICOS = [
-  { id: "t1", nombre: "Camilo Ahumada", zona: "Maipú", tipo: "interno", f: 1.06 },
-  { id: "t2", nombre: "Rodrigo Fuenzalida", zona: "Puente Alto", tipo: "interno", f: 0.92 },
-  { id: "t3", nombre: "Marcela Quiroz", zona: "Quilicura", tipo: "interno", f: 1.14 },
-  { id: "t4", nombre: "Ignacio Bustos", zona: "San Bernardo", tipo: "externo", f: 0.87 },
-  { id: "t5", nombre: "Paulina Vergara", zona: "Ñuñoa", tipo: "interno", f: 0.79 },
-  { id: "t6", nombre: "Héctor Sandoval", zona: "Pudahuel", tipo: "externo", f: 1.21 },
-  { id: "t7", nombre: "Daniela Riquelme", zona: "La Florida", tipo: "interno", f: 0.98 },
-  { id: "t8", nombre: "Óscar Peñaloza", zona: "Renca", tipo: "externo", f: 1.09 },
-  { id: "t9", nombre: "Valentina Cárdenas", zona: "Providencia", tipo: "interno", f: 0.84 },
-  { id: "t10", nombre: "Sebastián Molina", zona: "Melipilla", tipo: "externo", f: 1.33 },
-];
-const ZONAS = [...new Set(TECNICOS.map((t) => t.zona))].sort();
+function tecnicoFactor(id) {
+  // Factor estable por técnico (0.8–1.3), para que la simulación no salte
+  // de un refresh a otro. Reemplaza al campo "f" de un padrón de prueba.
+  return 0.8 + mulberry32(hash(id))() * 0.5;
+}
+const ZONAS = [...new Set(CP_DATA.tecnicos.map((t) => t.zona))].sort();
 const TIPOS_OT = ["Instalación", "Mantención", "Retiro", "Revisión en terreno"];
 
 /* ==========================================================================
@@ -236,8 +237,8 @@ function diasDelRango(rango) {
 function factorFiltros(filtros) {
   let f = 1;
   if (filtros.tecnico !== "todos") {
-    const t = TECNICOS.find((x) => x.id === filtros.tecnico);
-    if (t) f *= t.f;
+    const t = CP_DATA.techById[filtros.tecnico];
+    if (t) f *= tecnicoFactor(t.id);
   }
   if (filtros.zona !== "todas") f *= 0.94 + (hash(filtros.zona) % 13) / 100;
   if (filtros.tipoOT !== "todos") f *= 0.9 + (hash(filtros.tipoOT) % 21) / 100;
@@ -298,7 +299,7 @@ function obtenerSerie(indicadorId, rango, filtros) {
     iso: iso(d), etiqueta: etiquetaFecha(d), valor: valorDelDia(ind, d, filtros),
   }));
 
-  const candidatos = TECNICOS.filter(
+  const candidatos = CP_DATA.tecnicos.filter(
     (t) =>
       (filtros.tecnico === "todos" || t.id === filtros.tecnico) &&
       (filtros.zona === "todas" || t.zona === filtros.zona)
@@ -307,8 +308,8 @@ function obtenerSerie(indicadorId, rango, filtros) {
   const porTecnico = candidatos.map((t) => {
     const r = mulberry32(hash(ind.id + t.id + filtros.tipoOT))();
     return {
-      id: t.id, nombre: t.nombre, zona: t.zona, tipo: t.tipo,
-      valor: Math.max(ind.sim.min, promedio * t.f * (0.88 + r * 0.26)),
+      id: t.id, nombre: CP_DATA.tnombre(t), zona: t.zona, tipo: t.tipo,
+      valor: Math.max(ind.sim.min, promedio * tecnicoFactor(t.id) * (0.88 + r * 0.26)),
     };
   });
 
@@ -364,7 +365,8 @@ function direccionTexto(ind) {
 // Lectura bajo el gráfico principal: sólo para indicadores de rango, porque
 // ahí la referencia es un umbral acordado (no una comparación temporal).
 // Para el resto no hay nada honesto que decir sin la línea base — no se
-// muestra ninguna frase.
+// muestra ninguna frase. Esta es la decisión del supervisor: sin delta,
+// sin comparación contra el período anterior en ningún lado de la pantalla.
 function lectura(ind, valorActual) {
   if (ind.direccion !== "rango" || valorActual == null) return null;
   const [lo, hi] = ind.objetivo;
@@ -376,49 +378,12 @@ function lectura(ind, valorActual) {
 }
 
 /* ==========================================================================
-   6. PALETA — heredada del backoffice Control Position (Sprint 1)
-   ========================================================================== */
-const C = {
-  bg: "#FBF6F6", surface: "#ffffff", surface2: "#f8f3f3", surface3: "#f1eaea",
-  border: "#ece4e4", border2: "#e0d6d6", border3: "#cfc4c4",
-  text: "#1c1a1b", text2: "#635f60", text3: "#938d8e", text4: "#b6afaf",
-  accent: "#033E84", accentStrong: "#022c5f", accentSoft: "#e3ebf5", accentSofter: "#f0f4fa",
-  green: "#27945c", greenBg: "#e0f0e6", greenFg: "#1c6e44",
-  red: "#d8442f", redBg: "#fbe3df", redFg: "#9c2f23",
-  amber: "#d9930c", amberBg: "#fbefd6", amberFg: "#8a5d11",
-  slateBg: "#e9ecef", slateFg: "#4c5763",
-};
-const FUENTE = { fontFamily: "\"IBM Plex Sans\", system-ui, -apple-system, sans-serif" };
-
-const EstilosBase = () => (
-  <style>{`
-    @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap");
-    .cp-scroll::-webkit-scrollbar { width: 11px; height: 11px; }
-    .cp-scroll::-webkit-scrollbar-thumb { background: #d8d4c9; border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
-    .cp-focus:focus-visible { outline: 2px solid ${C.accent}; outline-offset: 2px; }
-    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
-  `}</style>
-);
-
-/* ==========================================================================
-   7. PIEZAS DE INTERFAZ COMPARTIDAS
+   6. PIEZAS DE INTERFAZ COMPARTIDAS
    ========================================================================== */
 
-function AvisoDatoSimulado({ compacto }) {
+function AvisoDatoSimulado() {
   if (USANDO_DATOS_REALES) return null;
-  return (
-    <span
-      className="inline-flex items-center gap-2 rounded-lg font-semibold"
-      style={{
-        background: C.amberBg, color: C.amberFg,
-        padding: compacto ? "3px 9px" : "6px 12px",
-        fontSize: compacto ? 11.5 : 12.5,
-      }}
-    >
-      <AlertTriangle size={compacto ? 12 : 14} />
-      Datos simulados — no usar para decisiones
-    </span>
-  );
+  return <Badge cls="b-amber" icon="alert">Datos simulados — no usar para decisiones</Badge>;
 }
 
 function InfoIndicador({ ind }) {
@@ -427,57 +392,49 @@ function InfoIndicador({ ind }) {
   useEffect(() => {
     if (!abierto) return;
     const cerrar = (e) => { if (caja.current && !caja.current.contains(e.target)) setAbierto(false); };
-    const esc = (e) => { if (e.key === "Escape") setAbierto(false); };
+    const escKey = (e) => { if (e.key === "Escape") setAbierto(false); };
     window.addEventListener("mousedown", cerrar);
-    window.addEventListener("keydown", esc);
-    return () => { window.removeEventListener("mousedown", cerrar); window.removeEventListener("keydown", esc); };
+    window.addEventListener("keydown", escKey);
+    return () => { window.removeEventListener("mousedown", cerrar); window.removeEventListener("keydown", escKey); };
   }, [abierto]);
 
   return (
-    <span className="relative inline-flex" ref={caja}>
+    <span style={{ position: "relative", display: "inline-flex" }} ref={caja}>
       <button
         type="button"
         aria-label={"Qué mide " + ind.nombre}
-        className="cp-focus inline-flex items-center justify-center rounded"
-        style={{ color: abierto ? C.accent : C.text4, width: 20, height: 20 }}
+        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, color: abierto ? "var(--accent)" : "var(--text-4)" }}
         onClick={(e) => { e.stopPropagation(); setAbierto((v) => !v); }}
       >
-        <Info size={15} />
+        <Icon name="info" style={{ width: 15, height: 15 }} />
       </button>
       {abierto && (
-        <div
-          className="absolute z-50 rounded-xl p-4"
-          style={{
-            top: 26, left: -8, width: 320, background: C.surface,
-            border: "1px solid " + C.border, boxShadow: "0 12px 40px rgba(28,20,20,.16)",
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-start gap-2">
-            <div className="font-semibold" style={{ fontSize: 13.5, color: C.text }}>{ind.nombre}</div>
+        <div className="ind-pop" onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <div style={{ fontWeight: 600, fontSize: 13.5, color: "var(--text)" }}>{ind.nombre}</div>
             <button
               type="button" aria-label="Cerrar"
-              className="cp-focus ml-auto rounded" style={{ color: C.text3 }}
+              style={{ marginLeft: "auto", color: "var(--text-3)", width: 20, height: 20, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 6 }}
               onClick={() => setAbierto(false)}
-            ><X size={14} /></button>
+            ><Icon name="x" style={{ width: 14, height: 14 }} /></button>
           </div>
-          <p className="mt-2" style={{ fontSize: 12.5, color: C.text2, lineHeight: 1.5 }}>{ind.definicion}</p>
-          <dl className="mt-3 space-y-2">
+          <p style={{ marginTop: 8, fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.5 }}>{ind.definicion}</p>
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
             <div>
-              <dt style={{ fontSize: 11, color: C.text3, fontWeight: 600 }}>Fórmula</dt>
-              <dd style={{ fontSize: 12, color: C.text, fontFamily: "\"IBM Plex Mono\", monospace", marginTop: 2 }}>{ind.formula}</dd>
+              <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Fórmula</div>
+              <div className="mono" style={{ fontSize: 12, color: "var(--text)", marginTop: 2 }}>{ind.formula}</div>
             </div>
             <div>
-              <dt style={{ fontSize: 11, color: C.text3, fontWeight: 600 }}>Unidad</dt>
-              <dd style={{ fontSize: 12, color: C.text, marginTop: 2 }}>
+              <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Unidad</div>
+              <div style={{ fontSize: 12, color: "var(--text)", marginTop: 2 }}>
                 {ind.unidad} · {direccionTexto(ind)}
-              </dd>
+              </div>
             </div>
             <div>
-              <dt style={{ fontSize: 11, color: C.text3, fontWeight: 600 }}>Fuente del dato</dt>
-              <dd style={{ fontSize: 12, color: C.text2, marginTop: 2, lineHeight: 1.5 }}>{ind.fuente}</dd>
+              <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Fuente del dato</div>
+              <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 2, lineHeight: 1.5 }}>{ind.fuente}</div>
             </div>
-          </dl>
+          </div>
         </div>
       )}
     </span>
@@ -505,13 +462,13 @@ function Sparkline({ datos, color, alto = 34 }) {
 function TooltipGrafico({ active, payload, label, ind }) {
   if (!active || !payload || !payload.length) return null;
   return (
-    <div className="rounded-lg p-3" style={{ background: C.surface, border: "1px solid " + C.border2, boxShadow: "0 6px 22px rgba(28,20,20,.12)" }}>
-      <div style={{ fontSize: 11.5, color: C.text3, fontWeight: 600 }}>{label}</div>
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 8, padding: 12, boxShadow: "var(--shadow-pop)" }}>
+      <div style={{ fontSize: 11.5, color: "var(--text-3)", fontWeight: 600 }}>{label}</div>
       {payload.map((p) => (
-        <div key={p.dataKey} className="mt-1 flex items-center gap-2">
+        <div key={p.dataKey} style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ width: 8, height: 8, borderRadius: 2, background: p.color, display: "inline-block" }} />
-          <span style={{ fontSize: 12, color: C.text2 }}>{p.name}</span>
-          <span className="ml-auto font-semibold" style={{ fontSize: 12.5, color: C.text }}>
+          <span style={{ fontSize: 12, color: "var(--text-2)" }}>{p.name}</span>
+          <span style={{ marginLeft: "auto", fontWeight: 600, fontSize: 12.5, color: "var(--text)" }}>
             {formatear(p.value, ind.formato)}
           </span>
         </div>
@@ -522,10 +479,10 @@ function TooltipGrafico({ active, payload, label, ind }) {
 
 function SinDatos({ motivo, alto = 220 }) {
   return (
-    <div className="flex flex-col items-center justify-center text-center" style={{ height: alto, padding: 24 }}>
-      <Inbox size={30} style={{ color: C.text4 }} />
-      <div className="mt-3 font-semibold" style={{ fontSize: 13.5, color: C.text2 }}>Sin datos en este rango</div>
-      <p className="mt-1" style={{ fontSize: 12.5, color: C.text3, maxWidth: 380, lineHeight: 1.5 }}>
+    <div className="empty" style={{ height: alto, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      <Icon name="inbox" />
+      <div style={{ marginTop: 4, fontWeight: 600, fontSize: 13.5, color: "var(--text-2)" }}>Sin datos en este rango</div>
+      <p style={{ marginTop: 4, fontSize: 12.5, color: "var(--text-3)", maxWidth: 380, lineHeight: 1.5 }}>
         {motivo || "Probá ampliar el período o sacar alguno de los filtros."}
       </p>
     </div>
@@ -534,35 +491,23 @@ function SinDatos({ motivo, alto = 220 }) {
 
 function Cargando({ alto = 220 }) {
   return (
-    <div className="flex flex-col items-center justify-center" style={{ height: alto }}>
-      <Loader2 size={22} style={{ color: C.text4 }} className="animate-spin" />
-      <div className="mt-2" style={{ fontSize: 12.5, color: C.text3 }}>Recalculando el período…</div>
+    <div style={{ height: alto, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      <span className="icon-spin" style={{ color: "var(--text-4)" }}><Icon name="refresh" style={{ width: 22, height: 22 }} /></span>
+      <div style={{ marginTop: 8, fontSize: 12.5, color: "var(--text-3)" }}>Recalculando el período…</div>
     </div>
   );
 }
 
 function Esqueleto({ alto = 34 }) {
-  return <div className="animate-pulse rounded" style={{ height: alto, background: C.surface3 }} />;
+  return <div className="skel" style={{ height: alto, borderRadius: 6, background: "var(--surface-3)" }} />;
 }
 
 /* ---- Selectores ---- */
-// Sin ancho fijo: el <select> se adapta a la opción elegida (nombres de
-// técnico, "Revisión en terreno", etc.) — nunca se corta el texto. El
-// min-width es sólo para que los selects vacíos/cortos no queden desparejos.
 function Selector({ etiqueta, valor, onChange, opciones }) {
   return (
-    <label className="inline-flex items-center gap-2" style={{ flexShrink: 0 }}>
-      <span style={{ fontSize: 12, color: C.text3, fontWeight: 600, whiteSpace: "nowrap" }}>{etiqueta}</span>
-      <select
-        className="cp-focus rounded-lg"
-        value={valor}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          fontSize: 12.5, fontWeight: 500, color: C.text, background: C.surface,
-          border: "1px solid " + C.border2, padding: "7px 9px", ...FUENTE,
-          minWidth: 110,
-        }}
-      >
+    <label style={{ display: "inline-flex", flexDirection: "column", gap: 4 }}>
+      <span className="field-label">{etiqueta}</span>
+      <select className="field-input" value={valor} onChange={(e) => onChange(e.target.value)} style={{ width: "auto" }}>
         {opciones.map((o) => (<option key={o.valor} value={o.valor}>{o.texto}</option>))}
       </select>
     </label>
@@ -592,194 +537,42 @@ function BarraFiltros({ rango, setRango, filtros, setFiltros, cargando, onRecarg
     setRango({ ...nuevo, dias: Math.min(dias, 180) });
   };
 
-  // El separador entre "Período" y los demás filtros sólo tiene sentido
-  // cuando todo está en una línea; si la barra se parte en dos (flex-wrap),
-  // se oculta comparando la posición vertical del primer y el último control.
-  const filaRef = useRef(null);
-  const [partida, setPartida] = useState(false);
-  useEffect(() => {
-    const fila = filaRef.current;
-    if (!fila) return;
-    const medir = () => {
-      const hijos = fila.children;
-      if (hijos.length < 2) { setPartida(false); return; }
-      const primero = hijos[0].getBoundingClientRect().top;
-      const ultimo = hijos[hijos.length - 1].getBoundingClientRect().top;
-      setPartida(Math.abs(ultimo - primero) > 4);
-    };
-    medir();
-    const obs = new ResizeObserver(medir);
-    obs.observe(fila);
-    return () => obs.disconnect();
-  }, [rango.preset]);
-
   return (
-    <div className="rounded-xl" style={{ background: C.surface, border: "1px solid " + C.border, padding: "12px 16px" }}>
-      <div ref={filaRef} className="flex flex-wrap items-center gap-x-5 gap-y-3">
-        <Selector etiqueta="Período" valor={rango.preset} onChange={cambiarPreset} opciones={PRESETS} />
-        {rango.preset === "custom" && (
-          <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
-            <input type="date" value={rango.desde || ""} onChange={(e) => cambiarFecha("desde", e.target.value)}
-              className="cp-focus rounded-lg"
-              style={{ fontSize: 12.5, border: "1px solid " + C.border2, padding: "6px 9px", color: C.text, ...FUENTE }} />
-            <span style={{ color: C.text3, fontSize: 12 }}>a</span>
-            <input type="date" value={rango.hasta || ""} onChange={(e) => cambiarFecha("hasta", e.target.value)}
-              className="cp-focus rounded-lg"
-              style={{ fontSize: 12.5, border: "1px solid " + C.border2, padding: "6px 9px", color: C.text, ...FUENTE }} />
-          </div>
-        )}
+    <div className="card card-pad" style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 18 }}>
+      <Selector etiqueta="Período" valor={rango.preset} onChange={cambiarPreset} opciones={PRESETS} />
+      {rango.preset === "custom" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input type="date" className="field-input" value={rango.desde || ""} onChange={(e) => cambiarFecha("desde", e.target.value)} style={{ width: 150 }} />
+          <span style={{ color: "var(--text-3)", fontSize: 12 }}>a</span>
+          <input type="date" className="field-input" value={rango.hasta || ""} onChange={(e) => cambiarFecha("hasta", e.target.value)} style={{ width: 150 }} />
+        </div>
+      )}
 
-        {!partida && <div style={{ width: 1, height: 22, background: C.border2, flexShrink: 0 }} />}
+      <div style={{ width: 1, alignSelf: "stretch", background: "var(--border-2)" }} />
 
-        <Selector etiqueta="Técnico" valor={filtros.tecnico}
-          onChange={(v) => setFiltros({ ...filtros, tecnico: v })}
-          opciones={[{ valor: "todos", texto: "Todos" },
-            ...TECNICOS.map((t) => ({ valor: t.id, texto: t.nombre }))]} />
-        <Selector etiqueta="Zona" valor={filtros.zona}
-          onChange={(v) => setFiltros({ ...filtros, zona: v })}
-          opciones={[{ valor: "todas", texto: "Todas" },
-            ...ZONAS.map((z) => ({ valor: z, texto: z }))]} />
-        <Selector etiqueta="Tipo de OT" valor={filtros.tipoOT}
-          onChange={(v) => setFiltros({ ...filtros, tipoOT: v })}
-          opciones={[{ valor: "todos", texto: "Todos" },
-            ...TIPOS_OT.map((t) => ({ valor: t, texto: t }))]} />
+      <Selector etiqueta="Técnico" valor={filtros.tecnico}
+        onChange={(v) => setFiltros({ ...filtros, tecnico: v })}
+        opciones={[{ valor: "todos", texto: "Todos" },
+          ...CP_DATA.tecnicos.map((t) => ({ valor: t.id, texto: CP_DATA.tnombre(t) }))]} />
+      <Selector etiqueta="Zona" valor={filtros.zona}
+        onChange={(v) => setFiltros({ ...filtros, zona: v })}
+        opciones={[{ valor: "todas", texto: "Todas" },
+          ...ZONAS.map((z) => ({ valor: z, texto: z }))]} />
+      <Selector etiqueta="Tipo de OT" valor={filtros.tipoOT}
+        onChange={(v) => setFiltros({ ...filtros, tipoOT: v })}
+        opciones={[{ valor: "todos", texto: "Todos" },
+          ...TIPOS_OT.map((t) => ({ valor: t, texto: t }))]} />
 
-        <button type="button" onClick={onRecargar}
-          className="cp-focus ml-auto inline-flex items-center gap-2 rounded-lg font-medium"
-          style={{ fontSize: 12.5, color: C.text2, border: "1px solid " + C.border2, background: C.surface, padding: "7px 11px", whiteSpace: "nowrap", flexShrink: 0 }}>
-          <RefreshCw size={14} className={cargando ? "animate-spin" : ""} />
-          Actualizar
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ==========================================================================
-   8. SHELL DE NAVEGACIÓN — el mismo del backoffice Control Position
-   El dashboard se monta dentro del módulo GoodRoute, ítem "Dashboard".
-   ========================================================================== */
-const NAV_OPERACION = [
-  { id: "control", texto: "Centro de control", Icono: LayoutGrid },
-  { id: "ordenes", texto: "Órdenes de trabajo", Icono: ClipboardList },
-  { id: "tecnicos", texto: "Técnicos", Icono: Users },
-  { id: "instalaciones", texto: "Instalaciones", Icono: Wrench },
-];
-
-function Shell({ children, titulo, bajada, acciones }) {
-  const [abierto, setAbierto] = useState(true);
-  const [activo, setActivo] = useState("gr-dashboard");
-
-  const itemNav = (id, texto, Icono, sub) => {
-    const on = activo === id;
-    return (
-      <button key={id} type="button" onClick={() => setActivo(id)}
-        className="cp-focus flex w-full items-center gap-3 rounded-lg text-left"
-        style={{
-          padding: sub ? "8px 10px" : "9px 10px",
-          fontSize: sub ? 13 : 13.5,
-          fontWeight: on ? 600 : 500,
-          color: on ? C.accentStrong : C.text2,
-          background: on ? C.accentSoft : "transparent",
-        }}>
-        <Icono size={sub ? 17 : 18} style={{ color: on ? C.accent : C.text3, flex: "none" }} />
-        {texto}
+      <button type="button" onClick={onRecargar} className="btn" style={{ marginLeft: "auto" }}>
+        <span className={cargando ? "icon-spin" : ""}><Icon name="refresh" /></span>
+        Actualizar
       </button>
-    );
-  };
-
-  return (
-    <div style={{ ...FUENTE, background: C.bg, color: C.text, height: "100vh", display: "grid", gridTemplateColumns: "252px 1fr", overflow: "hidden" }}>
-      <EstilosBase />
-
-      <aside className="flex flex-col gap-2" style={{ background: C.surface, borderRight: "1px solid " + C.border, padding: "18px 14px" }}>
-        <div style={{ padding: "6px 8px 14px" }}>
-          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.3px", lineHeight: 1.05, color: C.accent }}>
-            CONTROL<br />POSITION
-          </div>
-          <div style={{ fontSize: 11.5, color: C.text3, marginTop: 6 }}>Back office</div>
-        </div>
-
-        <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: ".7px", color: C.text4, padding: "12px 10px 6px" }}>
-          OPERACIÓN
-        </div>
-        {NAV_OPERACION.map((n) => itemNav(n.id, n.texto, n.Icono))}
-
-        <div style={{ marginTop: 2 }}>
-          <button type="button" onClick={() => setAbierto((v) => !v)}
-            className="cp-focus flex w-full items-center gap-2 rounded-lg text-left"
-            style={{ padding: "9px 10px", color: C.text2 }}>
-            <span className="flex items-center gap-2.5" style={{ fontSize: 13.5, fontWeight: 600 }}>
-              <Zap size={18} style={{ color: C.accent }} />
-              GoodRoute
-            </span>
-            <ChevronDown size={14} className="ml-auto"
-              style={{ color: C.text4, transform: abierto ? "rotate(180deg)" : "none", transition: "transform .16s" }} />
-          </button>
-          {abierto && (
-            <div style={{ marginLeft: 19, paddingLeft: 12, borderLeft: "1.5px solid " + C.border2, marginTop: 4 }}>
-              {itemNav("gr-rutas", "Asignar rutas", MapPin, true)}
-              {itemNav("gr-dashboard", "Dashboard", LayoutGrid, true)}
-            </div>
-          )}
-        </div>
-
-        <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: ".7px", color: C.text4, padding: "12px 10px 6px" }}>
-          AJUSTES
-        </div>
-        {itemNav("config", "Configuración", Settings)}
-
-        <div className="mt-auto flex items-center gap-2" style={{ paddingTop: 12, borderTop: "1px solid " + C.border }}>
-          <span className="inline-flex items-center gap-1.5 rounded-md font-semibold"
-            style={{ background: C.greenBg, color: C.greenFg, fontSize: 11.5, padding: "2px 8px" }}>
-            <span style={{ width: 6, height: 6, borderRadius: 99, background: C.green }} />
-            RedGPS conectado
-          </span>
-        </div>
-      </aside>
-
-      <div className="flex min-w-0 flex-col overflow-hidden">
-        <header className="flex items-center gap-4"
-          style={{ height: 62, flex: "none", borderBottom: "1px solid " + C.border, background: "rgba(255,255,255,.82)", padding: "0 26px" }}>
-          <div className="flex flex-1 items-center gap-2 rounded-lg"
-            style={{ maxWidth: 560, background: C.surface2, border: "1px solid " + C.border2, padding: "8px 12px", color: C.text3 }}>
-            <Search size={16} />
-            <input placeholder="Buscar orden, cliente, patente o IMEI…"
-              className="flex-1 bg-transparent outline-none"
-              style={{ fontSize: 13.5, color: C.text, ...FUENTE }} />
-          </div>
-          <div className="ml-auto flex items-center gap-2.5">
-            <div className="grid place-items-center rounded-full font-semibold"
-              style={{ width: 34, height: 34, background: C.accent, color: "#fff", fontSize: 12.5 }}>CS</div>
-            <div style={{ lineHeight: 1.2 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>Camila Soto</div>
-              <div style={{ fontSize: 11, color: C.text3 }}>Supervisora</div>
-            </div>
-          </div>
-        </header>
-
-        <div className="cp-scroll flex-1 overflow-y-auto">
-          <div style={{ maxWidth: 1320, margin: "0 auto", padding: "30px 30px 60px" }}>
-            <div className="mb-6 flex flex-wrap items-start gap-4">
-              <div>
-                <h1 style={{ fontSize: 23, fontWeight: 650, letterSpacing: "-0.4px" }}>{titulo}</h1>
-                <p style={{ color: C.text2, fontSize: 13.5, marginTop: 3 }}>{bajada}</p>
-              </div>
-              <div className="ml-auto flex flex-wrap items-center gap-3">
-                <AvisoDatoSimulado />
-                {acciones}
-              </div>
-            </div>
-            {children}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
 
 /* ==========================================================================
-   9. HOOK DE DATOS — un solo lugar donde se pide todo el tablero
+   7. HOOK DE DATOS — un solo lugar donde se pide todo el tablero
    ========================================================================== */
 function useTablero() {
   const [rango, setRango] = useState({ preset: "30", dias: 30, desde: null, hasta: null });
@@ -808,73 +601,65 @@ function useTablero() {
 }
 
 /* ==========================================================================
-   VARIANTE A — TORRE DE CONTROL
-   Hipótesis: el supervisor entra a chequear el estado del día.
-   Tarjetas KPI arriba -> gráfico principal del indicador elegido -> tabla por técnico.
+   8. TORRE DE CONTROL — botonera de categorías, gráfico principal, tabla
    ========================================================================== */
 
 function TarjetaKPI({ ind, d, activo, onSelect, cargando }) {
   const grupo = GRUPOS.find((g) => g.id === ind.grupo);
   return (
-    <button type="button" onClick={() => onSelect(ind.id)}
-      className="cp-focus rounded-xl text-left"
-      style={{
-        background: C.surface, padding: "14px 15px 12px",
-        border: "1px solid " + (activo ? C.accent : C.border),
-        boxShadow: activo ? "0 0 0 3px " + C.accentSofter : "none",
-      }}>
-      <div className="flex items-start gap-1.5">
+    <div onClick={() => onSelect(ind.id)} className={"ind-card" + (activo ? " active" : "")}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
         <span style={{ width: 3, height: 15, borderRadius: 3, background: grupo.color, flex: "none", marginTop: 2 }} />
-        <span className="font-medium" style={{ fontSize: 12, color: C.text2, lineHeight: 1.3 }}>{ind.nombre}</span>
-        <span className="ml-auto" onClick={(e) => e.stopPropagation()}><InfoIndicador ind={ind} /></span>
+        <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-2)", lineHeight: 1.3 }}>{ind.nombre}</span>
+        <span style={{ marginLeft: "auto" }} onClick={(e) => e.stopPropagation()}><InfoIndicador ind={ind} /></span>
       </div>
 
-      {cargando ? <div className="mt-2"><Esqueleto alto={30} /></div> : d.vacio ? (
-        <div className="mt-2" style={{ fontSize: 20, fontWeight: 650, color: C.text4 }}>—</div>
+      {cargando ? <div style={{ marginTop: 8 }}><Esqueleto alto={30} /></div> : d.vacio ? (
+        <div style={{ marginTop: 8, fontSize: 20, fontWeight: 650, color: "var(--text-4)" }}>—</div>
       ) : (
-        <div className="mt-1.5" style={{ fontSize: 22, fontWeight: 680, letterSpacing: "-0.6px" }}>
+        <div style={{ marginTop: 6, fontSize: 22, fontWeight: 680, letterSpacing: "-0.6px" }}>
           {formatearCorto(d.valor, ind.formato)}
-          {ind.formato === "clpOT" && <span style={{ fontSize: 12, fontWeight: 500, color: C.text3 }}> /OT</span>}
+          {ind.formato === "clpOT" && <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-3)" }}> /OT</span>}
         </div>
       )}
 
-      {!d.vacio && <div className="mt-0.5" style={{ fontSize: 11, color: C.text3 }}>{direccionTexto(ind)}</div>}
+      {!d.vacio && <div style={{ marginTop: 2, fontSize: 11, color: "var(--text-3)" }}>{direccionTexto(ind)}</div>}
 
-      <div className="mt-1.5 flex items-center">
+      <div style={{ marginTop: 6, display: "flex", alignItems: "center" }}>
         <div style={{ width: "100%" }}>
           {!d.vacio && !cargando && <Sparkline datos={d.serie} color={grupo.color} alto={26} />}
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 
 // "Todos" no es un grupo real — es un atajo de UI para volver a la grilla
-// plana con los diez indicadores juntos, como se veía la variante A antes de
-// categorizar. Por eso no vive en GRUPOS: modificar GRUPOS agregando una
-// entrada falsa rompería los lookups que hace TablaTecnicos/TarjetaKPI contra
-// el grupo real de cada indicador.
+// plana con los diez indicadores juntos. Por eso no vive en GRUPOS: agregar
+// una entrada falsa ahí rompería los lookups que hacen TarjetaKPI/TablaTecnicos
+// contra el grupo real de cada indicador.
 const TODOS_ID = "todos";
 
-// Botonera de categorías, mecanismo tomado de la variante B: una pestaña por
-// grupo, generada iterando GRUPOS — un grupo nuevo en INDICADORES/GRUPOS
-// aparece acá solo, sin tocar este componente. "Todos" va al final, fijo.
+// Botonera de categorías: una pestaña por grupo, generada iterando GRUPOS —
+// un grupo nuevo en INDICADORES/GRUPOS aparece acá solo, sin tocar este
+// componente. "Todos" va al final, fijo.
 function BotonesCategoria({ grupoActivo, onCambiar }) {
   const boton = (key, on, color, nombre, cantidad) => (
     <button key={key} type="button" role="tab" aria-selected={on}
       onClick={() => onCambiar(key)}
-      className="cp-focus flex items-center gap-2.5 rounded-xl text-left"
       style={{
-        padding: "11px 15px", background: on ? C.surface : "transparent",
-        border: "1px solid " + (on ? C.border2 : "transparent"),
-        boxShadow: on ? "0 1px 2px rgba(40,30,30,.04)" : "none",
+        display: "flex", alignItems: "center", gap: 10, textAlign: "left",
+        padding: "11px 15px", borderRadius: "var(--radius)",
+        background: on ? "var(--surface)" : "transparent",
+        border: "1px solid " + (on ? "var(--border-2)" : "transparent"),
+        boxShadow: on ? "var(--shadow-sm)" : "none",
       }}>
-      <span style={{ width: 4, height: 26, borderRadius: 3, background: on ? color : C.border3 }} />
+      <span style={{ width: 4, height: 26, borderRadius: 3, background: on ? color : "var(--border-3)", flex: "none" }} />
       <span>
-        <span className="block" style={{ fontSize: 13.5, fontWeight: on ? 650 : 550, color: on ? C.text : C.text2 }}>
+        <span style={{ display: "block", fontSize: 13.5, fontWeight: on ? 650 : 550, color: on ? "var(--text)" : "var(--text-2)" }}>
           {nombre}
         </span>
-        <span className="block" style={{ fontSize: 11.5, color: C.text3 }}>
+        <span style={{ display: "block", fontSize: 11.5, color: "var(--text-3)" }}>
           {cantidad} {cantidad === 1 ? "indicador" : "indicadores"}
         </span>
       </span>
@@ -882,11 +667,11 @@ function BotonesCategoria({ grupoActivo, onCambiar }) {
   );
 
   return (
-    <nav className="flex flex-wrap gap-2" role="tablist" aria-label="Categorías de indicadores">
+    <nav style={{ display: "flex", flexWrap: "wrap", gap: 8 }} role="tablist" aria-label="Categorías de indicadores">
       {GRUPOS.map((g) =>
         boton(g.id, g.id === grupoActivo, g.color, g.nombre, INDICADORES.filter((i) => i.grupo === g.id).length)
       )}
-      {boton(TODOS_ID, grupoActivo === TODOS_ID, C.text3, "Todos", INDICADORES.length)}
+      {boton(TODOS_ID, grupoActivo === TODOS_ID, "var(--text-3)", "Todos", INDICADORES.length)}
     </nav>
   );
 }
@@ -897,26 +682,26 @@ function GraficoPrincipal({ ind, d, cargando, graficoRef }) {
   const nota = lectura(ind, d.valor);
 
   return (
-    <section className="rounded-xl" style={{ background: C.surface, border: "1px solid " + C.border }}>
-      <header className="flex flex-wrap items-center gap-3" style={{ padding: "16px 20px", borderBottom: "1px solid " + C.border }}>
+    <section className="block">
+      <div className="block-head" style={{ flexWrap: "wrap" }}>
         <div>
-          <div className="flex items-center gap-1.5">
-            <h2 style={{ fontSize: 15.5, fontWeight: 620 }}>{ind.nombre}</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div className="block-title">{ind.nombre}</div>
             <InfoIndicador ind={ind} />
           </div>
-          {nota && <p style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{nota}</p>}
+          {nota && <p style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 2 }}>{nota}</p>}
         </div>
-        <div className="ml-auto text-right">
-          <div style={{ fontSize: 11, color: C.text3, fontWeight: 600 }}>
+        <div style={{ marginLeft: "auto", textAlign: "right" }}>
+          <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>
             {esAcumulable(ind) ? "Total del período" : "Promedio del período"}
           </div>
           <div style={{ fontSize: 21, fontWeight: 680, letterSpacing: "-0.5px" }}>
             {d.vacio ? "—" : formatear(d.valor, ind.formato)}
           </div>
         </div>
-      </header>
+      </div>
 
-      <div ref={graficoRef} style={{ padding: "18px 14px 8px" }}>
+      <div ref={graficoRef} className="block-body" style={{ paddingTop: 18, paddingBottom: 8 }}>
         {cargando ? <Cargando alto={280} /> : d.vacio ? <SinDatos motivo={d.motivoVacio} alto={280} /> : (
           <ResponsiveContainer width="100%" height={280}>
             <AreaChart data={datos} margin={{ top: 4, right: 14, bottom: 0, left: 4 }}>
@@ -926,14 +711,14 @@ function GraficoPrincipal({ ind, d, cargando, graficoRef }) {
                   <stop offset="100%" stopColor={grupo.color} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid stroke={C.border} vertical={false} />
-              <XAxis dataKey="etiqueta" tick={{ fontSize: 11, fill: C.text3 }} tickLine={false}
-                axisLine={{ stroke: C.border2 }} minTickGap={22} />
-              <YAxis tick={{ fontSize: 11, fill: C.text3 }} tickLine={false} axisLine={false}
+              <CartesianGrid stroke="var(--border)" vertical={false} />
+              <XAxis dataKey="etiqueta" tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false}
+                axisLine={{ stroke: "var(--border-2)" }} minTickGap={22} />
+              <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false}
                 width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
               <Tooltip content={<TooltipGrafico ind={ind} />} />
               {ind.direccion === "rango" && (
-                <ReferenceArea y1={ind.objetivo[0]} y2={ind.objetivo[1]} fill={C.greenBg} fillOpacity={0.7} />
+                <ReferenceArea y1={ind.objetivo[0]} y2={ind.objetivo[1]} fill="var(--green-bg)" fillOpacity={0.7} />
               )}
               <Area type="monotone" dataKey="actual" name="Valor" stroke={grupo.color}
                 strokeWidth={2.2} fill="url(#gPrincipal)" dot={false} isAnimationActive={false} />
@@ -958,60 +743,58 @@ function TablaTecnicos({ ind, d, cargando, tablaRef }) {
   }, [d.porTecnico, orden]);
 
   const th = (campo, texto, alinearDerecha) => (
-    <th style={{ textAlign: alinearDerecha ? "right" : "left", padding: "10px 14px", borderBottom: "1px solid " + C.border }}>
+    <th style={{ textAlign: alinearDerecha ? "right" : "left" }}>
       <button type="button"
         onClick={() => setOrden((o) => ({ campo, asc: o.campo === campo ? !o.asc : true }))}
-        className="cp-focus inline-flex items-center gap-1.5 rounded"
-        style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".4px", color: orden.campo === campo ? C.accent : C.text3 }}>
-        {texto}<ArrowUpDown size={11} />
+        style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, letterSpacing: ".4px", textTransform: "uppercase", color: orden.campo === campo ? "var(--accent)" : "var(--text-3)" }}>
+        {texto}<Icon name="arrowUpDown" style={{ width: 11, height: 11 }} />
       </button>
     </th>
   );
 
   const max = Math.max(...filas.map((f) => f.valor), 1);
+  const grupo = GRUPOS.find((g) => g.id === ind.grupo);
 
   return (
-    <section ref={tablaRef} className="rounded-xl" style={{ background: C.surface, border: "1px solid " + C.border }}>
-      <header className="flex items-center gap-3" style={{ padding: "14px 20px", borderBottom: "1px solid " + C.border }}>
-        <h2 style={{ fontSize: 15.5, fontWeight: 620 }}>Detalle por técnico</h2>
-        <span style={{ fontSize: 12.5, color: C.text3 }}>{ind.nombre} · {esAcumulable(ind) ? "total" : "promedio"} del período</span>
-      </header>
-      {cargando ? <Cargando alto={200} /> : d.vacio ? <SinDatos motivo={d.motivoVacio} alto={200} /> : (
-        <table className="w-full" style={{ borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              {th("nombre", "TÉCNICO")}{th("zona", "COMUNA")}{th("tipo", "VÍNCULO")}
-              {th("valor", ind.unidad.toUpperCase(), true)}
-              <th style={{ width: 190, padding: "10px 14px", borderBottom: "1px solid " + C.border }} />
-            </tr>
-          </thead>
-          <tbody>
-            {filas.map((f) => (
-              <tr key={f.id}>
-                <td style={{ padding: "11px 14px", borderBottom: "1px solid " + C.border, fontSize: 13, fontWeight: 600 }}>{f.nombre}</td>
-                <td style={{ padding: "11px 14px", borderBottom: "1px solid " + C.border, fontSize: 13, color: C.text2 }}>{f.zona}</td>
-                <td style={{ padding: "11px 14px", borderBottom: "1px solid " + C.border, fontSize: 13, color: C.text2 }}>
-                  {f.tipo === "interno" ? "Interno" : "Externo"}
-                </td>
-                <td style={{ padding: "11px 14px", borderBottom: "1px solid " + C.border, fontSize: 13, fontWeight: 600, textAlign: "right" }}>
-                  {formatear(f.valor, ind.formato)}
-                </td>
-                <td style={{ padding: "11px 14px", borderBottom: "1px solid " + C.border }}>
-                  <div style={{ height: 6, borderRadius: 4, background: C.surface3, overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: (f.valor / max) * 100 + "%", background: GRUPOS.find((g) => g.id === ind.grupo).color }} />
-                  </div>
-                </td>
+    <>
+      <div className="sec-head">
+        <div className="sec-title">Detalle por técnico</div>
+        <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>{ind.nombre} · {esAcumulable(ind) ? "total" : "promedio"} del período</span>
+      </div>
+      <div ref={tablaRef} className="card">
+        {cargando ? <Cargando alto={200} /> : d.vacio ? <SinDatos motivo={d.motivoVacio} alto={200} /> : (
+          <table className="tbl">
+            <thead>
+              <tr>
+                {th("nombre", "TÉCNICO")}{th("zona", "COMUNA")}{th("tipo", "VÍNCULO")}
+                {th("valor", ind.unidad.toUpperCase(), true)}
+                <th style={{ width: 190 }} />
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </section>
+            </thead>
+            <tbody>
+              {filas.map((f) => (
+                <tr key={f.id}>
+                  <td className="cell-strong">{f.nombre}</td>
+                  <td className="cell-muted">{f.zona}</td>
+                  <td className="cell-muted">{f.tipo === "interno" ? "Interno" : "Externo"}</td>
+                  <td style={{ fontWeight: 600, textAlign: "right" }}>{formatear(f.valor, ind.formato)}</td>
+                  <td>
+                    <div className="pbar" style={{ width: "100%" }}>
+                      <i style={{ width: (f.valor / max) * 100 + "%", background: grupo.color }} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
   );
 }
 
 /* ==========================================================================
-   10. EXPORTACIÓN A PDF
+   9. EXPORTACIÓN A PDF
    --------------------------------------------------------------------------
    Exporta exactamente lo que el usuario tiene en pantalla en ese momento
    (categoría activa, indicador elegido, orden de tabla, período y filtros),
@@ -1035,12 +818,25 @@ function textoCategoriaActiva(grupoActivo, grupo) {
 function textoFiltrosActivos(filtros) {
   const partes = [];
   if (filtros.tecnico !== "todos") {
-    const t = TECNICOS.find((x) => x.id === filtros.tecnico);
-    if (t) partes.push("Técnico: " + t.nombre);
+    const t = CP_DATA.techById[filtros.tecnico];
+    if (t) partes.push("Técnico: " + CP_DATA.tnombre(t));
   }
   if (filtros.zona !== "todas") partes.push("Zona: " + filtros.zona);
   if (filtros.tipoOT !== "todos") partes.push("Tipo de OT: " + filtros.tipoOT);
   return partes.length ? partes.join("  ·  ") : "Sin filtros aplicados";
+}
+
+// pdfmake no corre en el DOM: no puede resolver var(--accent) ni nada de
+// app/styles.css. Se resuelven acá las pocas variables que el PDF necesita
+// a valores concretos, así el documento sigue el mismo tema/Tweaks de la
+// pantalla en el momento de exportar, sin duplicar una paleta a mano.
+function resolverPaletaPdf() {
+  const raiz = getComputedStyle(document.documentElement);
+  const leer = (v) => raiz.getPropertyValue(v).trim();
+  return {
+    accent: leer("--accent"), text: leer("--text"), text2: leer("--text-2"), text3: leer("--text-3"),
+    amberFg: leer("--amber-fg"), amberBg: leer("--amber-bg"), redFg: leer("--red-fg"), border: leer("--border"),
+  };
 }
 
 // Rasteriza el <svg> vivo del gráfico principal a un PNG de alta resolución.
@@ -1094,7 +890,7 @@ function leerFilasTabla(tablaRef) {
   });
 }
 
-function celdaTarjetaPdf(ind, d) {
+function celdaTarjetaPdf(ind, d, paleta) {
   const grupo = GRUPOS.find((g) => g.id === ind.grupo);
   return {
     unbreakable: true,
@@ -1103,16 +899,16 @@ function celdaTarjetaPdf(ind, d) {
       { canvas: [{ type: "rect", x: 0, y: 0, w: 18, h: 3, color: grupo.color }], margin: [0, 0, 0, 4] },
       { text: ind.nombre, fontSize: 9.5, bold: true, margin: [0, 0, 0, 2] },
       { text: d.vacio ? "—" : formatearCorto(d.valor, ind.formato) + (!d.vacio && ind.formato === "clpOT" ? " /OT" : ""), fontSize: 15, bold: true },
-      { text: d.vacio ? "Sin datos con los filtros actuales" : direccionTexto(ind), fontSize: 8, color: C.text3, margin: [0, 1, 0, 0] },
+      { text: d.vacio ? "Sin datos con los filtros actuales" : direccionTexto(ind), fontSize: 8, color: paleta.text3, margin: [0, 1, 0, 0] },
     ],
   };
 }
 
-function tablaTarjetasPdf(indicadores, datos) {
+function tablaTarjetasPdf(indicadores, datos, paleta) {
   const columnas = 3;
   const filas = [];
   for (let i = 0; i < indicadores.length; i += columnas) {
-    const fila = indicadores.slice(i, i + columnas).map((ind) => celdaTarjetaPdf(ind, datos[ind.id]));
+    const fila = indicadores.slice(i, i + columnas).map((ind) => celdaTarjetaPdf(ind, datos[ind.id], paleta));
     while (fila.length < columnas) fila.push({ text: "" });
     filas.push(fila);
   }
@@ -1125,8 +921,9 @@ function tablaTarjetasPdf(indicadores, datos) {
 
 // Arma el árbol de contenido que pdfmake necesita — sin tocar ningún dato
 // que no sea el que ya está en pantalla (delGrupo/ind/datos/rango/filtros
-// vienen tal cual del estado de DashboardTorreDeControl).
+// vienen tal cual del estado de DashboardAnalisisScreen).
 function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, filtros, fechaInicioISO, fechaFinISO, imagenGrafico, filasTabla }) {
+  const paleta = resolverPaletaPdf();
   const d = datos[ind.id];
   const fechaGeneracion = new Date();
   const fechaGeneracionTexto =
@@ -1135,16 +932,16 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
   const textoCategoria = textoCategoriaActiva(grupoActivo, grupo);
 
   const contenido = [
-    { text: "CONTROL POSITION", fontSize: 13, bold: true, color: C.accent },
+    { text: "CONTROL POSITION", fontSize: 13, bold: true, color: paleta.accent },
     { text: "Análisis de indicadores de asignación", fontSize: 17, bold: true, margin: [0, 3, 0, 2] },
-    { text: "Generado el " + fechaGeneracionTexto, fontSize: 9, color: C.text3, margin: [0, 0, 0, 10] },
+    { text: "Generado el " + fechaGeneracionTexto, fontSize: 9, color: paleta.text3, margin: [0, 0, 0, 10] },
     {
       text: [
         { text: "Categoría: ", bold: true }, textoCategoria + "   ·   ",
         { text: "Período: ", bold: true }, fechaCompleta(fechaInicioISO) + " al " + fechaCompleta(fechaFinISO) + "   ·   ",
         { text: "Filtros: ", bold: true }, textoFiltrosActivos(filtros),
       ],
-      fontSize: 9.5, color: C.text2, margin: [0, 0, 0, 12],
+      fontSize: 9.5, color: paleta.text2, margin: [0, 0, 0, 12],
     },
   ];
 
@@ -1152,7 +949,7 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
   // false, no hay manera de omitirlo desde acá.
   if (!USANDO_DATOS_REALES) {
     contenido.push({
-      table: { widths: ["*"], body: [[{ text: "AVISO — Datos simulados: no usar para decisiones", fontSize: 10.5, bold: true, color: C.amberFg, fillColor: C.amberBg, margin: [10, 8, 10, 8], border: [false, false, false, false] }]] },
+      table: { widths: ["*"], body: [[{ text: "AVISO — Datos simulados: no usar para decisiones", fontSize: 10.5, bold: true, color: paleta.amberFg, fillColor: paleta.amberBg, margin: [10, 8, 10, 8], border: [false, false, false, false] }]] },
       layout: "noBorders",
       margin: [0, 0, 0, 14],
     });
@@ -1165,15 +962,15 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
 
   contenido.push({
     unbreakable: true,
-    stack: [tituloSeccion("Indicadores — " + textoCategoria, 0), tablaTarjetasPdf(delGrupo, datos)],
+    stack: [tituloSeccion("Indicadores — " + textoCategoria, 0), tablaTarjetasPdf(delGrupo, datos, paleta)],
   });
 
   const cuerpoEvolucion = d.vacio
-    ? { text: "Sin datos para este indicador con los filtros actuales. " + (d.motivoVacio || ""), italics: true, color: C.text3, fontSize: 9.5, margin: [0, 0, 0, 12] }
+    ? { text: "Sin datos para este indicador con los filtros actuales. " + (d.motivoVacio || ""), italics: true, color: paleta.text3, fontSize: 9.5, margin: [0, 0, 0, 12] }
     : imagenGrafico
       ? {
           stack: [
-            { text: (esAcumulable(ind) ? "Total del período: " : "Promedio del período: ") + formatear(d.valor, ind.formato), fontSize: 9.5, color: C.text2, margin: [0, 0, 0, 6] },
+            { text: (esAcumulable(ind) ? "Total del período: " : "Promedio del período: ") + formatear(d.valor, ind.formato), fontSize: 9.5, color: paleta.text2, margin: [0, 0, 0, 6] },
             { image: imagenGrafico.dataUrl, fit: [500, 280], margin: [0, 0, 0, 12] },
           ],
         }
@@ -1181,7 +978,7 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
   contenido.push({ unbreakable: true, stack: [tituloSeccion("Evolución — " + ind.nombre, 14), cuerpoEvolucion] });
 
   const tablaTecnicoPdf = (d.vacio || !filasTabla.length)
-    ? { text: "Sin datos por técnico para este indicador con los filtros actuales.", italics: true, color: C.text3, fontSize: 9.5, margin: [0, 0, 0, 12] }
+    ? { text: "Sin datos por técnico para este indicador con los filtros actuales.", italics: true, color: paleta.text3, fontSize: 9.5, margin: [0, 0, 0, 12] }
     : {
         table: {
           headerRows: 1,
@@ -1189,15 +986,15 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
           dontBreakRows: true,
           body: [
             [
-              { text: "TÉCNICO", fontSize: 8.5, bold: true, color: C.text3 },
-              { text: "COMUNA", fontSize: 8.5, bold: true, color: C.text3 },
-              { text: "VÍNCULO", fontSize: 8.5, bold: true, color: C.text3 },
-              { text: ind.unidad.toUpperCase(), fontSize: 8.5, bold: true, color: C.text3, alignment: "right" },
+              { text: "TÉCNICO", fontSize: 8.5, bold: true, color: paleta.text3 },
+              { text: "COMUNA", fontSize: 8.5, bold: true, color: paleta.text3 },
+              { text: "VÍNCULO", fontSize: 8.5, bold: true, color: paleta.text3 },
+              { text: ind.unidad.toUpperCase(), fontSize: 8.5, bold: true, color: paleta.text3, alignment: "right" },
             ],
             ...filasTabla.map((f) => [
               { text: f[0], fontSize: 9.5 },
-              { text: f[1], fontSize: 9.5, color: C.text2 },
-              { text: f[2], fontSize: 9.5, color: C.text2 },
+              { text: f[1], fontSize: 9.5, color: paleta.text2 },
+              { text: f[2], fontSize: 9.5, color: paleta.text2 },
               { text: f[3], fontSize: 9.5, bold: true, alignment: "right" },
             ]),
           ],
@@ -1205,7 +1002,7 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
         layout: {
           hLineWidth: (i) => (i === 0 ? 0 : 0.5),
           vLineWidth: () => 0,
-          hLineColor: () => C.border,
+          hLineColor: () => paleta.border,
           paddingLeft: () => 8, paddingRight: () => 8, paddingTop: () => 6, paddingBottom: () => 6,
         },
         margin: [0, 0, 0, 14],
@@ -1216,11 +1013,11 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
     stack: [
       { text: i.nombre, fontSize: 11, bold: true, margin: [0, 8, 0, 3] },
       { text: i.definicion, fontSize: 9.5, margin: [0, 0, 0, 4] },
-      { text: "Fórmula", fontSize: 8, bold: true, color: C.text3 },
+      { text: "Fórmula", fontSize: 8, bold: true, color: paleta.text3 },
       { text: i.formula, fontSize: 9.5, italics: true, margin: [0, 1, 0, 4] },
-      { text: "Unidad", fontSize: 8, bold: true, color: C.text3 },
+      { text: "Unidad", fontSize: 8, bold: true, color: paleta.text3 },
       { text: i.unidad + "  ·  " + direccionTexto(i), fontSize: 9.5, margin: [0, 1, 0, 4] },
-      { text: "Fuente del dato", fontSize: 8, bold: true, color: C.text3 },
+      { text: "Fuente del dato", fontSize: 8, bold: true, color: paleta.text3 },
       { text: i.fuente, fontSize: 9.5, margin: [0, 1, 0, 0] },
     ],
   });
@@ -1238,14 +1035,17 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
     pageMargins: [40, 40, 40, 46],
     footer: (paginaActual, totalPaginas) =>
       totalPaginas > 1
-        ? { text: paginaActual + " / " + totalPaginas, alignment: "center", fontSize: 8, color: C.text3, margin: [0, 10, 0, 0] }
+        ? { text: paginaActual + " / " + totalPaginas, alignment: "center", fontSize: 8, color: paleta.text3, margin: [0, 10, 0, 0] }
         : null,
     content: contenido,
-    defaultStyle: { font: "Roboto", fontSize: 10, color: C.text },
+    defaultStyle: { font: "Roboto", fontSize: 10, color: paleta.text },
   };
 }
 
-function DashboardTorreDeControl() {
+/* ==========================================================================
+   PANTALLA — montada por app/main.jsx en route.screen === "analisis"
+   ========================================================================== */
+function DashboardAnalisisScreen() {
   const { rango, setRango, filtros, setFiltros, cargando, datos, recargar } = useTablero();
   const [grupoActivo, setGrupoActivo] = useState(GRUPOS[0].id);
   const grupo = grupoActivo === TODOS_ID ? null : GRUPOS.find((g) => g.id === grupoActivo);
@@ -1307,41 +1107,40 @@ function DashboardTorreDeControl() {
   };
 
   return (
-    <Shell titulo="Análisis" bajada="Indicadores de asignación en el tiempo"
-      acciones={
-        <span className="inline-flex items-center gap-2">
-          {errorPdf && <span style={{ fontSize: 12, color: C.redFg }}>{errorPdf}</span>}
-          <button type="button" onClick={descargarPdf} disabled={generandoPdf || cargando}
-            className="cp-focus inline-flex items-center gap-2 rounded-lg font-medium"
-            style={{
-              fontSize: 12.5, color: C.text2, border: "1px solid " + C.border2, background: C.surface,
-              padding: "7px 12px", opacity: generandoPdf || cargando ? 0.6 : 1,
-              cursor: generandoPdf || cargando ? "not-allowed" : "pointer",
-            }}>
-            {generandoPdf
-              ? <Loader2 size={14} className="animate-spin" />
-              : <Download size={14} />}
+    <div className="page fade-in">
+      <div className="page-head">
+        <div>
+          <div className="page-title">Análisis</div>
+          <div className="page-sub">Indicadores de asignación en el tiempo</div>
+        </div>
+        <div className="page-head-actions">
+          <AvisoDatoSimulado />
+          {errorPdf && <span style={{ fontSize: 12, color: "var(--red-fg)" }}>{errorPdf}</span>}
+          <button type="button" onClick={descargarPdf} disabled={generandoPdf || cargando} className="btn"
+            style={{ opacity: generandoPdf || cargando ? 0.6 : 1, cursor: generandoPdf || cargando ? "not-allowed" : "pointer" }}>
+            <span className={generandoPdf ? "icon-spin" : ""}><Icon name={generandoPdf ? "refresh" : "download"} /></span>
             {generandoPdf ? "Generando…" : "Descargar PDF"}
           </button>
-        </span>
-      }>
-      <div className="flex flex-col gap-5">
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         <BarraFiltros rango={rango} setRango={setRango} filtros={filtros} setFiltros={setFiltros}
           cargando={cargando} onRecargar={recargar} />
 
         <BotonesCategoria grupoActivo={grupoActivo} onCambiar={cambiarCategoria} />
 
         {grupo && (
-          <div className="rounded-xl" style={{ background: C.accentSofter, border: "1px solid " + C.accentSoft, padding: "13px 17px" }}>
-            <p style={{ fontSize: 13.5, color: C.accentStrong, fontWeight: 550 }}>{grupo.pregunta}</p>
+          <div className="card card-pad" style={{ background: "var(--accent-softer)", borderColor: "var(--accent-soft)" }}>
+            <p style={{ fontSize: 13.5, color: "var(--accent-strong)", fontWeight: 550 }}>{grupo.pregunta}</p>
           </div>
         )}
 
         <div>
-          <p className="mb-2.5" style={{ fontSize: 12.5, color: C.text3 }}>
+          <p style={{ marginBottom: 10, fontSize: 12.5, color: "var(--text-3)" }}>
             Elegí una tarjeta para ver su evolución abajo.
           </p>
-          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
+          <div className="ind-grid">
             {delGrupo.map((i) => (
               <TarjetaKPI key={i.id} ind={i} d={datos[i.id]} cargando={cargando}
                 activo={i.id === seleccionado} onSelect={setSeleccionado} />
@@ -1352,12 +1151,8 @@ function DashboardTorreDeControl() {
         <GraficoPrincipal ind={ind} d={datos[ind.id]} cargando={cargando} graficoRef={graficoRef} />
         <TablaTecnicos ind={ind} d={datos[ind.id]} cargando={cargando} tablaRef={tablaRef} />
       </div>
-    </Shell>
+    </div>
   );
 }
 
-
-/* ---- Montaje ---- */
-ReactDOM.createRoot(document.getElementById("root")).render(
-  React.createElement(DashboardTorreDeControl)
-);
+Object.assign(window, { DashboardAnalisisScreen });

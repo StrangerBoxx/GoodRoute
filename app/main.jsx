@@ -182,6 +182,7 @@ function App() {
   else if (route.screen === "settings") content = <Settings initialSection={route.params.section} />;
   else if (route.screen === "profile") content = <Profile go={go} />;
   else if (route.screen === "rutasExterno") content = <RutasExternoScreen onToast={setToast} />;
+  else if (route.screen === "analisis") content = <DashboardAnalisisScreen />;
 
   if (!authed) {
     if (authView === "forgot") return <ForgotPassword onBack={() => setAuthView("login")} />;

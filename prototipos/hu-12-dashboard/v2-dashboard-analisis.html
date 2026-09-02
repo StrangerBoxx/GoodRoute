@@ -37,6 +37,11 @@
   <script>window.react = window.React;</script>
   <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/lucide-react@0.383.0/dist/umd/lucide-react.min.js" crossorigin="anonymous"></script>
+  <!-- Exportar a PDF: pdfmake arma el documento como árbol de texto/tablas
+       vectoriales (no una captura de pantalla). vfs_fonts trae la fuente
+       Roboto embebida — sin ella pdfMake no tiene con qué dibujar texto. -->
+  <script src="https://unpkg.com/pdfmake@0.2.10/build/pdfmake.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/pdfmake@0.2.10/build/vfs_fonts.js" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
   <script type="text/babel" data-presets="react" src="./app/v2-dashboard.jsx"></script>
   <script>

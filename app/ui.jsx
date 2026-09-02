@@ -40,6 +40,13 @@ const ICONS = {
   cloud: "M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z",
   zap: "M13 2L3 14h9l-1 8 10-12h-9l1-8z",
   external: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3",
+  info: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01",
+  arrowUpRight: "M7 7h10v10M7 17L17 7",
+  arrowDownRight: "M7 7v10h10M7 7l10 10",
+  minus: "M5 12h14",
+  arrowUpDown: "M21 16l-4 4-4-4M17 20V4M3 8l4-4 4 4M7 4v16",
+  inbox: "M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z",
+  download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
 };
 function Icon({ name, style }) {
   const d = ICONS[name] || "";
