@@ -1,7 +1,5 @@
 /* ============ Sidebar + Top header ============ */
-// Apunta a la galería de prototipos mientras el supervisor elige la variante
-// definitiva de dashboard; cuando la elija, alcanza con cambiar esta URL.
-const GOODROUTE_DASHBOARD_URL = "https://strangerboxx.github.io/MVP-prototipo-cp/prototipos/";
+const GOODROUTE_DASHBOARD_URL = "https://strangerboxx.github.io/MVP-prototipo-cp/prototipos/hu-12-dashboard/v2-dashboard-analisis.html";
 
 function GoodRouteNavGroup({ active, onNavigate }) {
   const [open, setOpen] = useState(true);
@@ -20,7 +18,7 @@ function GoodRouteNavGroup({ active, onNavigate }) {
           </button>
           <a className="nav-item" href={GOODROUTE_DASHBOARD_URL} target="_blank" rel="noopener">
             <Icon name="dashboard" />
-            Galería de dashboards
+            Dashboard
             <span className="nav-ext-ico"><Icon name="external" /></span>
           </a>
         </div>

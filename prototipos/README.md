@@ -34,11 +34,11 @@ Poder abrir la v1 al lado de la v2 es medio punto de la revisión.
 prototipos/
   index.html                    galería de versiones (editá el array VERSIONES)
   hu-12-dashboard/
-    v1-A-torre-de-control.html  página que carga el prototipo
-    v1-B-por-dominio.html
-    v1-C-evolucion-comparada.html
+    v2-dashboard-analisis.html  página que carga el prototipo (aprobada)
+    v1-B-por-dominio.html       archivada
+    v1-C-evolucion-comparada.html  archivada
     app/
-      v1-A.jsx                  el prototipo en sí
+      v2-dashboard.jsx          el prototipo en sí
       v1-B.jsx
       v1-C.jsx
 ```

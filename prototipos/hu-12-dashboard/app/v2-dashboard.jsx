@@ -978,7 +978,7 @@ function DashboardTorreDeControl() {
   const ind = INDICADORES.find((i) => i.id === seleccionado) || INDICADORES[0];
 
   return (
-    <Shell titulo="Análisis" bajada="Indicadores de asignación en el tiempo · variante A, torre de control">
+    <Shell titulo="Análisis" bajada="Indicadores de asignación en el tiempo">
       <div className="flex flex-col gap-5">
         <BarraFiltros rango={rango} setRango={setRango} filtros={filtros} setFiltros={setFiltros}
           cargando={cargando} onRecargar={recargar} />
