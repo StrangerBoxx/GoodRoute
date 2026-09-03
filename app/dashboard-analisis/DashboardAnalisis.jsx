@@ -4,9 +4,10 @@
    Pantalla real del backoffice: vive en el routing de app/main.jsx
    (route.screen === "analisis"), montada dentro del Sidebar/TopBar de
    siempre. Es la variante A ("Torre de control") con el diseño que el
-   supervisor terminó aprobando después de dos rondas de feedback:
-   botonera de categorías (con un tab "Todos" al final) en vez de una
-   grilla plana, y sin comparación contra el período anterior.
+   supervisor terminó aprobando: botonera de categorías (con un tab "Todos"
+   al final) en vez de una grilla plana, sin comparación contra el período
+   anterior, y un tipo de gráfico distinto por indicador según su
+   naturaleza (ver INDICADORES[].grafico y GRAFICOS_POR_TIPO).
 
    Esta es la ÚNICA copia conectada al proyecto — la fuente de verdad para
    cualquier cambio futuro del dashboard. prototipos/hu-12-dashboard/ (A, B
@@ -20,7 +21,7 @@
    Tweaks de Marca).
    ========================================================================== */
 const {
-  ResponsiveContainer, AreaChart, Area,
+  ResponsiveContainer, ComposedChart, AreaChart, Area, Bar, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceArea,
 } = Recharts;
 
@@ -49,6 +50,12 @@ const USANDO_DATOS_REALES = false;
      granularidad  "tecnico"  -> se puede filtrar y desagregar por técnico
                    "global"   -> sólo existe a nivel de sistema
      objetivo      [min, max] opcional; sólo para direccion "rango"
+     grafico       tipo de gráfico grande para este indicador — una clave de
+                   GRAFICOS_POR_TIPO/EXPLICACION_POR_TIPO más abajo. Si falta,
+                   se usa "area" (el gráfico de área simple de siempre). El
+                   componente nunca decide el tipo mirando el id: agregar un
+                   indicador nuevo con su "grafico" alcanza para que se vea
+                   bien, sin tocar GraficoPrincipal ni ningún otro componente.
      sim           parámetros del generador de datos simulados
    ========================================================================== */
 const INDICADORES = [
@@ -59,7 +66,7 @@ const INDICADORES = [
     formula: "Σ km recorridos, agrupado por técnico",
     fuente: "GPS del vehículo (RedGPS), tramos entre paradas de la ruta.",
     unidad: "km", formato: "km", direccion: "menos", granularidad: "tecnico",
-    grupo: "recurso",
+    grupo: "recurso", grafico: "barras_horizontales_ranking",
     sim: { base: 118, ruido: 0.14, tendencia: -0.09, finde: 0.38, min: 40, max: 210 },
   },
   {
@@ -70,7 +77,7 @@ const INDICADORES = [
     formula: "rutas_no_modificadas / rutas_propuestas",
     fuente: "Log de aceptación del optimizador. Ojo: hoy cuenta como modificada cualquier edición.",
     unidad: "%", formato: "pct", direccion: "mas", granularidad: "global",
-    grupo: "optimizador",
+    grupo: "optimizador", grafico: "linea",
     sim: { base: 71, ruido: 0.11, tendencia: 0.16, finde: 0.94, min: 40, max: 96 },
   },
   {
@@ -81,7 +88,7 @@ const INDICADORES = [
     formula: "(tiempo_traslado + tiempo_atencion) / duracion_turno",
     fuente: "Marcas de inicio y cierre de OT en la app del técnico + tramos GPS.",
     unidad: "%", formato: "pct", direccion: "rango", objetivo: [75, 88],
-    granularidad: "tecnico", grupo: "recurso",
+    granularidad: "tecnico", grupo: "recurso", grafico: "linea_banda_min_max",
     sim: { base: 80, ruido: 0.09, tendencia: 0.09, finde: 0.96, min: 45, max: 97 },
   },
   {
@@ -92,7 +99,7 @@ const INDICADORES = [
     formula: "OT_insertadas_factibles / OT_nuevas_solicitadas",
     fuente: "Motor de reoptimización, eventos de inserción durante la jornada.",
     unidad: "%", formato: "pct", direccion: "mas", granularidad: "global",
-    grupo: "optimizador",
+    grupo: "optimizador", grafico: "barras_apiladas_linea_secundaria",
     sim: { base: 63, ruido: 0.17, tendencia: 0.21, finde: 0.7, min: 20, max: 92 },
   },
   {
@@ -102,7 +109,7 @@ const INDICADORES = [
     formula: "conteo de OT con técnico asignado",
     fuente: "Backoffice Control Position, tabla de órdenes de trabajo.",
     unidad: "OT", formato: "ot", direccion: "contexto", granularidad: "tecnico",
-    grupo: "recurso",
+    grupo: "recurso", grafico: "barras_verticales",
     sim: { base: 34, ruido: 0.19, tendencia: 0.13, finde: 0.24, min: 4, max: 62 },
   },
   {
@@ -113,7 +120,7 @@ const INDICADORES = [
     formula: "km_baseline − km_optimizados",
     fuente: "Comparación contra ruta secuencial por orden de ingreso. Línea base por acordar.",
     unidad: "km", formato: "km", direccion: "mas", granularidad: "tecnico",
-    grupo: "optimizador",
+    grupo: "optimizador", grafico: "barras_verticales",
     sim: { base: 96, ruido: 0.21, tendencia: 0.24, finde: 0.3, min: 15, max: 220 },
   },
   {
@@ -123,7 +130,7 @@ const INDICADORES = [
     formula: "km_ahorrados × costo_km + horas_ahorradas × costo_hora_tecnico",
     fuente: "Indicador derivado. Depende de la misma línea base que la distancia optimizada.",
     unidad: "$", formato: "clp", direccion: "mas", granularidad: "tecnico",
-    grupo: "economicos",
+    grupo: "economicos", grafico: "area_acumulada",
     sim: { base: 268000, ruido: 0.22, tendencia: 0.26, finde: 0.28, min: 40000, max: 620000 },
   },
   {
@@ -134,7 +141,7 @@ const INDICADORES = [
     formula: "Σ minutos_espera_en_sitio × costo_minuto_tecnico",
     fuente: "Diferencia entre llegada GPS e inicio de OT en la app, × costo minuto.",
     unidad: "$", formato: "clp", direccion: "menos", granularidad: "tecnico",
-    grupo: "economicos",
+    grupo: "economicos", grafico: "barras_apiladas_tecnico",
     sim: { base: 84000, ruido: 0.24, tendencia: -0.19, finde: 0.3, min: 12000, max: 210000 },
   },
   {
@@ -145,7 +152,7 @@ const INDICADORES = [
     formula: "(horas × costo_hora + km × costo_km) / instalaciones_exitosas",
     fuente: "Nómina + consumo de combustible + cierres exitosos del día.",
     unidad: "$/OT", formato: "clpOT", direccion: "menos", granularidad: "tecnico",
-    grupo: "economicos",
+    grupo: "economicos", grafico: "linea_barras_fondo",
     sim: { base: 12400, ruido: 0.13, tendencia: -0.11, finde: 1.28, min: 6500, max: 21000 },
   },
   {
@@ -156,20 +163,16 @@ const INDICADORES = [
     formula: "promedio(hora_llegada − inicio_ventana)",
     fuente: "Llegada GPS vs. ventana pactada. Las llegadas anticipadas hoy se cuentan como cero.",
     unidad: "min", formato: "min", direccion: "menos", granularidad: "tecnico",
-    grupo: "cliente",
+    grupo: "cliente", grafico: "linea_banda_percentiles",
     sim: { base: 17, ruido: 0.19, tendencia: -0.16, finde: 1.15, min: 3, max: 42 },
   },
 ];
 
 const GRUPOS = [
-  { id: "optimizador", nombre: "Desempeño del optimizador", color: "#033E84",
-    pregunta: "¿El optimizador está proponiendo rutas que se usan tal cual?" },
-  { id: "recurso", nombre: "Uso del recurso técnico", color: "#e07419",
-    pregunta: "¿Estamos cargando bien a la cuadrilla?" },
-  { id: "economicos", nombre: "Económicos", color: "#1c6e44",
-    pregunta: "¿Cuánta plata deja o cuesta la operación de hoy?" },
-  { id: "cliente", nombre: "Experiencia del cliente", color: "#7c54c9",
-    pregunta: "¿Estamos llegando cuando dijimos que íbamos a llegar?" },
+  { id: "optimizador", nombre: "Desempeño del optimizador", color: "#033E84" },
+  { id: "recurso", nombre: "Uso del recurso técnico", color: "#e07419" },
+  { id: "economicos", nombre: "Económicos", color: "#1c6e44" },
+  { id: "cliente", nombre: "Experiencia del cliente", color: "#7c54c9" },
 ];
 
 /* ==========================================================================
@@ -196,12 +199,28 @@ const TIPOS_OT = ["Instalación", "Mantención", "Retiro", "Revisión en terreno
 
    Devuelve:
      {
-       serie:    [{ iso, etiqueta, valor }]   período seleccionado
+       serie: [{
+         iso, etiqueta, valor,        // siempre
+         min, max,                    // sólo si ind.grafico === "linea_banda_min_max"
+         mediana, p25, p75,           // sólo si ind.grafico === "linea_banda_percentiles"
+         insertadas, rechazadas,      // sólo si ind.grafico === "barras_apiladas_linea_secundaria"
+         volumenOt,                   // sólo si ind.grafico === "linea_barras_fondo"
+       }],
        anterior: [{ iso, etiqueta, valor }]   período inmediatamente previo
-       porTecnico: [{ id, nombre, zona, tipo, valor }]
+       porTecnico: [{ id, nombre, zona, tipo, valor }]   agregado del período completo (sin cambios)
+       porTecnicoDia: [{ id, nombre, zona, tipo, dias: [{ iso, etiqueta, valor }] }]
+                       opcional — sólo si ind.grafico === "barras_horizontales_ranking"
+                       | "barras_apiladas_tecnico". Es el desglose día a día por
+                       técnico que esos dos gráficos necesitan (porTecnico sólo
+                       trae un valor agregado para todo el período, no sirve
+                       para una barra apilada por día).
        vacio:    boolean  -> true cuando la combinación de filtros no tiene dato
        motivoVacio: string
      }
+
+   Todos los campos nuevos son opcionales: un indicador cuyo "grafico" no los
+   necesita simplemente no los recibe — el backend real sólo tiene que llenar
+   los campos que el "grafico" de cada indicador efectivamente usa.
    ========================================================================== */
 
 // Hoy fijo: el prototipo del Sprint 1 opera sobre el lunes 1 de junio de 2026.
@@ -267,6 +286,47 @@ function valorDelDia(ind, fecha, filtros) {
   return Math.max(s.min, Math.min(s.max, v));
 }
 
+// Valor simulado de un indicador para UN técnico en UN día — perturba
+// valorDelDia con el factor estable de ese técnico. Es la base de
+// porTecnicoDia y de las bandas min/máx y percentiles (que necesitan un
+// valor por técnico, no sólo el agregado del día).
+function valorDelDiaTecnico(ind, fecha, filtros, tecnico) {
+  const base = valorDelDia(ind, fecha, filtros);
+  const semilla = hash(ind.id + "|tecnico|" + tecnico.id + "|" + iso(fecha));
+  const r = mulberry32(semilla)();
+  return Math.max(ind.sim.min, base * tecnicoFactor(tecnico.id) * (0.85 + r * 0.3));
+}
+
+// Percentil por interpolación lineal sobre un array YA ordenado ascendente.
+function percentil(valoresOrdenados, p) {
+  if (!valoresOrdenados.length) return null;
+  const idx = (valoresOrdenados.length - 1) * p;
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return valoresOrdenados[lo];
+  return valoresOrdenados[lo] + (valoresOrdenados[hi] - valoresOrdenados[lo]) * (idx - lo);
+}
+
+// Solicitudes de inserción en vivo ese día (denominador de la tasa) — sin
+// esto, un 60% sobre 3 solicitudes se ve idéntico a un 60% sobre 40.
+function solicitudesDelDia(fecha, filtros) {
+  const semilla = hash("insercion_vivo_solicitudes|" + iso(fecha) + "|" + filtros.zona + "|" + filtros.tipoOT);
+  const r = mulberry32(semilla)();
+  return Math.round(4 + r * 38);
+}
+
+// Volumen de OT del día — denominador de costo_por_ot. En días de poco
+// volumen el costo por OT se dispara aunque nada haya empeorado; sin ver
+// el volumen ese pico se malinterpreta.
+function volumenOtDelDia(fecha, filtros) {
+  const semilla = hash("costo_por_ot_volumen|" + iso(fecha) + "|" + filtros.zona + "|" + filtros.tipoOT);
+  const r = mulberry32(semilla)();
+  const dow = fecha.getDay();
+  const finde = dow === 0 || dow === 6;
+  let v = 5 + r * 22;
+  if (finde) v *= 0.35;
+  return Math.max(1, Math.round(v));
+}
+
 function obtenerSerie(indicadorId, rango, filtros) {
   /* ---- INICIO DEL CUERPO REEMPLAZABLE ---------------------------------- */
   const ind = INDICADORES.find((x) => x.id === indicadorId);
@@ -281,11 +341,49 @@ function obtenerSerie(indicadorId, rango, filtros) {
     };
   }
 
+  const candidatos = CP_DATA.tecnicos.filter(
+    (t) =>
+      (filtros.tecnico === "todos" || t.id === filtros.tecnico) &&
+      (filtros.zona === "todas" || t.zona === filtros.zona)
+  );
+
+  // Mismo espíritu que la regla de arriba: un indicador por técnico sin
+  // ningún técnico que combine los filtros de técnico y zona no tiene nada
+  // que mostrar — ni en el gráfico, ni en la tabla, ni en el PDF.
+  if (ind.granularidad === "tecnico" && candidatos.length === 0) {
+    return {
+      serie: [], anterior: [], porTecnico: [], vacio: true,
+      motivoVacio: "No hay ningún técnico que combine el filtro de técnico y el de zona elegidos.",
+    };
+  }
+
   const dias = diasDelRango(rango);
   const n = dias.length;
-  const serie = dias.map((d) => ({
-    iso: iso(d), etiqueta: etiquetaFecha(d), valor: valorDelDia(ind, d, filtros),
-  }));
+  const serie = dias.map((d) => {
+    const punto = { iso: iso(d), etiqueta: etiquetaFecha(d), valor: valorDelDia(ind, d, filtros) };
+
+    if (ind.grafico === "linea_banda_min_max" && candidatos.length) {
+      const valores = candidatos.map((t) => valorDelDiaTecnico(ind, d, filtros, t)).sort((a, b) => a - b);
+      punto.min = valores[0];
+      punto.max = valores[valores.length - 1];
+    }
+    if (ind.grafico === "linea_banda_percentiles" && candidatos.length) {
+      const valores = candidatos.map((t) => valorDelDiaTecnico(ind, d, filtros, t)).sort((a, b) => a - b);
+      punto.mediana = percentil(valores, 0.5);
+      punto.p25 = percentil(valores, 0.25);
+      punto.p75 = percentil(valores, 0.75);
+    }
+    if (ind.grafico === "barras_apiladas_linea_secundaria") {
+      const solicitudes = solicitudesDelDia(d, filtros);
+      const insertadas = Math.round(solicitudes * (punto.valor / 100));
+      punto.insertadas = insertadas;
+      punto.rechazadas = Math.max(0, solicitudes - insertadas);
+    }
+    if (ind.grafico === "linea_barras_fondo") {
+      punto.volumenOt = volumenOtDelDia(d, filtros);
+    }
+    return punto;
+  });
 
   // "anterior" (el período inmediatamente previo) hoy NO se muestra en la
   // interfaz: la línea base para comparar todavía no está acordada con el
@@ -299,11 +397,6 @@ function obtenerSerie(indicadorId, rango, filtros) {
     iso: iso(d), etiqueta: etiquetaFecha(d), valor: valorDelDia(ind, d, filtros),
   }));
 
-  const candidatos = CP_DATA.tecnicos.filter(
-    (t) =>
-      (filtros.tecnico === "todos" || t.id === filtros.tecnico) &&
-      (filtros.zona === "todas" || t.zona === filtros.zona)
-  );
   const promedio = serie.reduce((a, b) => a + b.valor, 0) / Math.max(1, serie.length);
   const porTecnico = candidatos.map((t) => {
     const r = mulberry32(hash(ind.id + t.id + filtros.tipoOT))();
@@ -313,7 +406,20 @@ function obtenerSerie(indicadorId, rango, filtros) {
     };
   });
 
-  return { serie, anterior, porTecnico, vacio: serie.length === 0, motivoVacio: "" };
+  // Desglose día a día por técnico — sólo para los dos gráficos que lo
+  // necesitan (el ranking horizontal y las barras apiladas por técnico).
+  // El resto de los indicadores no paga el costo de calcularlo.
+  let porTecnicoDia;
+  if (ind.grafico === "barras_horizontales_ranking" || ind.grafico === "barras_apiladas_tecnico") {
+    porTecnicoDia = candidatos.map((t) => ({
+      id: t.id, nombre: CP_DATA.tnombre(t), zona: t.zona, tipo: t.tipo,
+      dias: dias.map((d) => ({
+        iso: iso(d), etiqueta: etiquetaFecha(d), valor: valorDelDiaTecnico(ind, d, filtros, t),
+      })),
+    }));
+  }
+
+  return { serie, anterior, porTecnico, porTecnicoDia, vacio: serie.length === 0, motivoVacio: "" };
   /* ---- FIN DEL CUERPO REEMPLAZABLE ------------------------------------- */
 }
 
@@ -441,24 +547,34 @@ function InfoIndicador({ ind }) {
   );
 }
 
-function Sparkline({ datos, color, alto = 34 }) {
+// El sparkline mide ~26px de alto: ahí no se leen barras ni bandas, así que
+// siempre es línea/área simple sin importar ind.grafico. El único ajuste es
+// "relleno": los formatos de porcentaje no lo llevan, porque el área bajo
+// una curva de porcentaje no representa ninguna cantidad real.
+function Sparkline({ datos, color, alto = 34, relleno = true }) {
   if (!datos.length) return <div style={{ height: alto }} />;
+  const idGrad = "sp" + color.replace("#", "");
   return (
     <ResponsiveContainer width="100%" height={alto}>
       <AreaChart data={datos} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-        <defs>
-          <linearGradient id={"sp" + color.replace("#", "")} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.22} />
-            <stop offset="100%" stopColor={color} stopOpacity={0} />
-          </linearGradient>
-        </defs>
+        {relleno && (
+          <defs>
+            <linearGradient id={idGrad} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.22} />
+              <stop offset="100%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+        )}
         <Area type="monotone" dataKey="valor" stroke={color} strokeWidth={1.6}
-          fill={"url(#sp" + color.replace("#", "") + ")"} dot={false} isAnimationActive={false} />
+          fill={relleno ? "url(#" + idGrad + ")" : "none"} dot={false} isAnimationActive={false} />
       </AreaChart>
     </ResponsiveContainer>
   );
 }
 
+// Tooltip genérico: un punto con una o más series simples (mismo formato
+// para todas). Sirve para área/línea/barras de un solo valor y para las
+// barras apiladas por técnico (cada Bar ya trae su nombre y su color).
 function TooltipGrafico({ active, payload, label, ind }) {
   if (!active || !payload || !payload.length) return null;
   return (
@@ -470,6 +586,51 @@ function TooltipGrafico({ active, payload, label, ind }) {
           <span style={{ fontSize: 12, color: "var(--text-2)" }}>{p.name}</span>
           <span style={{ marginLeft: "auto", fontWeight: 600, fontSize: 12.5, color: "var(--text)" }}>
             {formatear(p.value, ind.formato)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Tooltip para los gráficos de banda (min/máx y percentiles): no lista
+// series sueltas (el "min" y el "rango" son un truco de apilado interno,
+// no algo que el usuario tenga que ver) — muestra el valor central y el
+// rango completo en dos líneas con nombres claros.
+function TooltipBanda({ active, payload, label, ind, etiquetaCentral, etiquetaBanda }) {
+  if (!active || !payload || !payload.length) return null;
+  const punto = payload[0].payload;
+  const tieneBanda = punto.min != null;
+  const max = tieneBanda ? punto.min + (punto.rango || 0) : null;
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 8, padding: 12, boxShadow: "var(--shadow-pop)" }}>
+      <div style={{ fontSize: 11.5, color: "var(--text-3)", fontWeight: 600 }}>{label}</div>
+      <div style={{ marginTop: 4, fontSize: 12.5, color: "var(--text)" }}>
+        {etiquetaCentral}: <strong>{formatear(punto.valor, ind.formato)}</strong>
+      </div>
+      {tieneBanda && (
+        <div style={{ marginTop: 2, fontSize: 12, color: "var(--text-2)" }}>
+          {etiquetaBanda}: {formatear(punto.min, ind.formato)} – {formatear(max, ind.formato)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Tooltip para gráficos que mezclan series de distinta unidad en un mismo
+// punto (ej. OT contadas junto a un porcentaje) — cada dataKey define cómo
+// formatear su propio valor en vez de usar el formato del indicador para todo.
+function TooltipMixto({ active, payload, label, formatoPorClave }) {
+  if (!active || !payload || !payload.length) return null;
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 8, padding: 12, boxShadow: "var(--shadow-pop)" }}>
+      <div style={{ fontSize: 11.5, color: "var(--text-3)", fontWeight: 600 }}>{label}</div>
+      {payload.map((p) => (
+        <div key={p.dataKey} style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: p.color, display: "inline-block" }} />
+          <span style={{ fontSize: 12, color: "var(--text-2)" }}>{p.name}</span>
+          <span style={{ marginLeft: "auto", fontWeight: 600, fontSize: 12.5, color: "var(--text)" }}>
+            {formatoPorClave[p.dataKey] ? formatoPorClave[p.dataKey](p.value) : p.value}
           </span>
         </div>
       ))}
@@ -601,7 +762,278 @@ function useTablero() {
 }
 
 /* ==========================================================================
-   8. TORRE DE CONTROL — botonera de categorías, gráfico principal, tabla
+   8. GRÁFICO GRANDE — un componente por tipo, elegido por ind.grafico
+   --------------------------------------------------------------------------
+   Cada uno recibe { ind, d, grupo } y arma su propio eje/tooltip, porque la
+   forma de los datos cambia según el tipo. GRAFICOS_POR_TIPO más abajo es
+   el único lugar que sabe qué componente corresponde a qué "grafico".
+   ========================================================================== */
+const EJE_X = { tick: { fontSize: 11, fill: "var(--text-3)" }, tickLine: false, axisLine: { stroke: "var(--border-2)" }, minTickGap: 22 };
+const MARGEN_GRAFICO = { top: 4, right: 14, bottom: 0, left: 4 };
+
+// Fallback / comportamiento original: área simple, un valor por día.
+function GraficoArea({ ind, d, grupo }) {
+  const datos = d.serie.map((p) => ({ etiqueta: p.etiqueta, valor: p.valor }));
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <AreaChart data={datos} margin={MARGEN_GRAFICO}>
+        <defs>
+          <linearGradient id="gArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={grupo.color} stopOpacity={0.2} />
+            <stop offset="100%" stopColor={grupo.color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="etiqueta" {...EJE_X} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
+        <Tooltip content={<TooltipGrafico ind={ind} />} />
+        {ind.direccion === "rango" && <ReferenceArea y1={ind.objetivo[0]} y2={ind.objetivo[1]} fill="var(--green-bg)" fillOpacity={0.7} />}
+        <Area type="monotone" dataKey="valor" name="Valor" stroke={grupo.color} strokeWidth={2.2} fill="url(#gArea)" dot={false} isAnimationActive={false} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+// tasa_asignacion: línea sin relleno — es una tasa continua, el área bajo
+// una curva de porcentaje no significa nada.
+function GraficoLinea({ ind, d, grupo }) {
+  const datos = d.serie.map((p) => ({ etiqueta: p.etiqueta, valor: p.valor }));
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <ComposedChart data={datos} margin={MARGEN_GRAFICO}>
+        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="etiqueta" {...EJE_X} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
+        <Tooltip content={<TooltipGrafico ind={ind} />} />
+        {ind.direccion === "rango" && <ReferenceArea y1={ind.objetivo[0]} y2={ind.objetivo[1]} fill="var(--green-bg)" fillOpacity={0.7} />}
+        <Line type="monotone" dataKey="valor" name="Valor" stroke={grupo.color} strokeWidth={2.2} dot={false} isAnimationActive={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+// saturacion: promedio + banda sombreada entre el mínimo y el máximo entre
+// técnicos ese día. La dispersión es el hallazgo: 81% de promedio puede ser
+// todos en 81, o uno en 98 y otro en 60. Mantiene la banda verde del rango
+// objetivo (criterio acordado, no comparación temporal).
+function GraficoBandaMinMax({ ind, d, grupo }) {
+  const datos = d.serie.map((p) => ({
+    etiqueta: p.etiqueta, valor: p.valor,
+    min: p.min != null ? p.min : p.valor,
+    rango: p.min != null && p.max != null ? Math.max(0, p.max - p.min) : 0,
+  }));
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <ComposedChart data={datos} margin={MARGEN_GRAFICO}>
+        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="etiqueta" {...EJE_X} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
+        <Tooltip content={<TooltipBanda ind={ind} etiquetaCentral="Promedio" etiquetaBanda="Rango entre técnicos" />} />
+        {ind.direccion === "rango" && <ReferenceArea y1={ind.objetivo[0]} y2={ind.objetivo[1]} fill="var(--green-bg)" fillOpacity={0.7} />}
+        <Area type="monotone" dataKey="min" stackId="banda" stroke="none" fill="none" isAnimationActive={false} />
+        <Area type="monotone" dataKey="rango" stackId="banda" name="Rango entre técnicos" stroke="none" fill={grupo.color} fillOpacity={0.16} isAnimationActive={false} />
+        <Line type="monotone" dataKey="valor" name="Promedio" stroke={grupo.color} strokeWidth={2.2} dot={false} isAnimationActive={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+// espera_cliente: mediana + banda entre percentil 25 y 75. El promedio acá
+// es engañoso: 16 minutos puede ser todos esperando 16, o casi todos en 5
+// y unos pocos en 90 — los que reclaman son la cola, y el promedio la borra.
+function GraficoBandaPercentiles({ ind, d, grupo }) {
+  const datos = d.serie.map((p) => ({
+    etiqueta: p.etiqueta,
+    valor: p.mediana != null ? p.mediana : p.valor,
+    min: p.p25 != null ? p.p25 : p.valor,
+    rango: p.p25 != null && p.p75 != null ? Math.max(0, p.p75 - p.p25) : 0,
+  }));
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <ComposedChart data={datos} margin={MARGEN_GRAFICO}>
+        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="etiqueta" {...EJE_X} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
+        <Tooltip content={<TooltipBanda ind={ind} etiquetaCentral="Mediana" etiquetaBanda="Percentil 25 a 75" />} />
+        <Area type="monotone" dataKey="min" stackId="banda" stroke="none" fill="none" isAnimationActive={false} />
+        <Area type="monotone" dataKey="rango" stackId="banda" name="Percentil 25 a 75" stroke="none" fill={grupo.color} fillOpacity={0.16} isAnimationActive={false} />
+        <Line type="monotone" dataKey="valor" name="Mediana" stroke={grupo.color} strokeWidth={2.2} dot={false} isAnimationActive={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+// insercion_vivo: OT insertadas + rechazadas apiladas (volumen), más la tasa
+// como línea sobre un eje secundario. 60% sobre 3 solicitudes y 60% sobre
+// 40 son situaciones distintas — el volumen tiene que verse.
+function GraficoBarrasStackLinea({ ind, d }) {
+  const datos = d.serie.map((p) => ({
+    etiqueta: p.etiqueta, insertadas: p.insertadas || 0, rechazadas: p.rechazadas || 0, tasa: p.valor,
+  }));
+  const formatos = {
+    insertadas: (v) => nf(v, 0) + " OT", rechazadas: (v) => nf(v, 0) + " OT", tasa: (v) => formatear(v, "pct"),
+  };
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <ComposedChart data={datos} margin={MARGEN_GRAFICO}>
+        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="etiqueta" {...EJE_X} />
+        <YAxis yAxisId="izq" tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={40} tickFormatter={(v) => nf(v, 0)} />
+        <YAxis yAxisId="der" orientation="right" tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={46} domain={[0, 100]} tickFormatter={(v) => nf(v, 0) + "%"} />
+        <Tooltip content={<TooltipMixto formatoPorClave={formatos} />} />
+        <Bar yAxisId="izq" dataKey="insertadas" name="Insertadas" stackId="ot" fill="var(--accent)" isAnimationActive={false} />
+        <Bar yAxisId="izq" dataKey="rechazadas" name="Rechazadas" stackId="ot" fill="var(--border-3)" isAnimationActive={false} />
+        <Line yAxisId="der" type="monotone" dataKey="tasa" name="Tasa" stroke="var(--accent-strong)" strokeWidth={2} dot={false} isAnimationActive={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ot_asignadas / dist_optimizada: barras verticales — conteo/flujo diario
+// discreto, una línea inventaría continuidad entre un día y el siguiente.
+function GraficoBarras({ ind, d, grupo }) {
+  const datos = d.serie.map((p) => ({ etiqueta: p.etiqueta, valor: p.valor }));
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <ComposedChart data={datos} margin={MARGEN_GRAFICO}>
+        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="etiqueta" {...EJE_X} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
+        <Tooltip content={<TooltipGrafico ind={ind} />} />
+        <Bar dataKey="valor" name="Valor" fill={grupo.color} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+// dinero_ahorrado: área ACUMULADA — la pregunta de un piloto es cuánto
+// llevamos ahorrado, no cuánto se ahorró el martes. Único caso donde el
+// relleno es correcto: el área sí representa una cantidad acumulada.
+function GraficoAreaAcumulada({ ind, d, grupo }) {
+  let acumulado = 0;
+  const datos = d.serie.map((p) => { acumulado += p.valor; return { etiqueta: p.etiqueta, valor: acumulado }; });
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <AreaChart data={datos} margin={MARGEN_GRAFICO}>
+        <defs>
+          <linearGradient id="gAcum" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={grupo.color} stopOpacity={0.25} />
+            <stop offset="100%" stopColor={grupo.color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="etiqueta" {...EJE_X} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
+        <Tooltip content={<TooltipGrafico ind={ind} />} />
+        <Area type="monotone" dataKey="valor" name="Acumulado" stroke={grupo.color} strokeWidth={2.2} fill="url(#gAcum)" dot={false} isAnimationActive={false} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+// costo_inactividad: barras apiladas por técnico — flujo diario cuya acción
+// correctiva es sobre una persona puntual, no sobre el total.
+function GraficoBarrasTecnico({ ind, d }) {
+  const porTecnicoDia = d.porTecnicoDia || [];
+  if (!porTecnicoDia.length) return <SinDatos motivo="No hay técnicos para desglosar en este período." alto={280} />;
+  const nDias = porTecnicoDia[0].dias.length;
+  const datos = Array.from({ length: nDias }, (_, i) => {
+    const fila = { etiqueta: porTecnicoDia[0].dias[i].etiqueta };
+    porTecnicoDia.forEach((t) => { fila[t.id] = t.dias[i].valor; });
+    return fila;
+  });
+  const coloresRespaldo = ["var(--accent)", "var(--green-dot)", "var(--orange-dot)", "var(--violet-dot)", "var(--teal-dot)", "var(--slate-dot)"];
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <ComposedChart data={datos} margin={MARGEN_GRAFICO}>
+        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="etiqueta" {...EJE_X} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
+        <Tooltip content={<TooltipGrafico ind={ind} />} />
+        {porTecnicoDia.map((t, i) => {
+          const real = CP_DATA.techById[t.id];
+          const color = (real && real.color) || coloresRespaldo[i % coloresRespaldo.length];
+          return <Bar key={t.id} dataKey={t.id} name={t.nombre} stackId="costo" fill={color} isAnimationActive={false} />;
+        })}
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+// costo_por_ot: línea del costo, con el volumen de OT del día de fondo en
+// un eje secundario. Es un cociente: en días de poco volumen el
+// denominador se achica y el costo se dispara sin que nada haya empeorado.
+function GraficoLineaVolumen({ ind, d, grupo }) {
+  const datos = d.serie.map((p) => ({ etiqueta: p.etiqueta, valor: p.valor, volumenOt: p.volumenOt || 0 }));
+  const formatos = { valor: (v) => formatear(v, ind.formato), volumenOt: (v) => nf(v, 0) + " OT" };
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <ComposedChart data={datos} margin={MARGEN_GRAFICO}>
+        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="etiqueta" {...EJE_X} />
+        <YAxis yAxisId="izq" tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
+        <YAxis yAxisId="der" orientation="right" tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={36} tickFormatter={(v) => nf(v, 0)} />
+        <Tooltip content={<TooltipMixto formatoPorClave={formatos} />} />
+        <Bar yAxisId="der" dataKey="volumenOt" name="OT del día" fill="var(--border-3)" fillOpacity={0.7} isAnimationActive={false} />
+        <Line yAxisId="izq" type="monotone" dataKey="valor" name="Costo por OT" stroke={grupo.color} strokeWidth={2.2} dot={false} isAnimationActive={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+// km_tecnico: ranking horizontal — la pregunta es quién recorre de más, no
+// cómo evolucionó el total. Un valor por técnico (promedio del período,
+// mismo criterio que el resto de la pantalla para este indicador),
+// ordenado de mayor a menor.
+function GraficoBarrasHorizontales({ ind, d, grupo }) {
+  const porTecnicoDia = d.porTecnicoDia || [];
+  if (!porTecnicoDia.length) return <SinDatos motivo="No hay técnicos para mostrar en este período." alto={280} />;
+  const datos = porTecnicoDia
+    .map((t) => ({ nombre: t.nombre, valor: promedio(t.dias) }))
+    .sort((a, b) => b.valor - a.valor);
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <ComposedChart data={datos} layout="vertical" margin={{ top: 4, right: 24, bottom: 4, left: 4 }}>
+        <CartesianGrid stroke="var(--border)" horizontal={false} />
+        <XAxis type="number" tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={{ stroke: "var(--border-2)" }} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
+        <YAxis type="category" dataKey="nombre" width={130} tick={{ fontSize: 11.5, fill: "var(--text-2)" }} tickLine={false} axisLine={false} />
+        <Tooltip content={<TooltipGrafico ind={ind} />} />
+        <Bar dataKey="valor" name="Valor" fill={grupo.color} radius={[0, 3, 3, 0]} isAnimationActive={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+// Único punto que sabe qué componente corresponde a cada "grafico" — y la
+// frase corta que explica qué se está mostrando (CAMBIO 5). Un indicador
+// nuevo con un "grafico" existente hereda ambos solo con aparecer acá.
+const GRAFICOS_POR_TIPO = {
+  area: GraficoArea,
+  linea: GraficoLinea,
+  linea_banda_min_max: GraficoBandaMinMax,
+  linea_banda_percentiles: GraficoBandaPercentiles,
+  barras_apiladas_linea_secundaria: GraficoBarrasStackLinea,
+  barras_verticales: GraficoBarras,
+  area_acumulada: GraficoAreaAcumulada,
+  barras_apiladas_tecnico: GraficoBarrasTecnico,
+  linea_barras_fondo: GraficoLineaVolumen,
+  barras_horizontales_ranking: GraficoBarrasHorizontales,
+};
+const EXPLICACION_POR_TIPO = {
+  area: "evolución diaria",
+  linea: "evolución diaria",
+  linea_banda_min_max: "promedio con mínimo y máximo entre técnicos",
+  linea_banda_percentiles: "mediana y rango intercuartil (percentil 25 a 75)",
+  barras_apiladas_linea_secundaria: "insertadas y rechazadas por día, con la tasa",
+  barras_verticales: "total diario",
+  area_acumulada: "acumulado del período",
+  barras_apiladas_tecnico: "desglose diario por técnico",
+  linea_barras_fondo: "costo por OT, con el volumen del día de referencia",
+  barras_horizontales_ranking: "promedio del período por técnico, de mayor a menor",
+};
+
+/* ==========================================================================
+   9. TORRE DE CONTROL — botonera de categorías, gráfico principal, tabla
    ========================================================================== */
 
 function TarjetaKPI({ ind, d, activo, onSelect, cargando }) {
@@ -627,7 +1059,7 @@ function TarjetaKPI({ ind, d, activo, onSelect, cargando }) {
 
       <div style={{ marginTop: 6, display: "flex", alignItems: "center" }}>
         <div style={{ width: "100%" }}>
-          {!d.vacio && !cargando && <Sparkline datos={d.serie} color={grupo.color} alto={26} />}
+          {!d.vacio && !cargando && <Sparkline datos={d.serie} color={grupo.color} alto={26} relleno={ind.formato !== "pct"} />}
         </div>
       </div>
     </div>
@@ -677,9 +1109,10 @@ function BotonesCategoria({ grupoActivo, onCambiar }) {
 }
 
 function GraficoPrincipal({ ind, d, cargando, graficoRef }) {
-  const datos = d.serie.map((p) => ({ etiqueta: p.etiqueta, actual: p.valor }));
   const grupo = GRUPOS.find((g) => g.id === ind.grupo);
   const nota = lectura(ind, d.valor);
+  const explicacion = EXPLICACION_POR_TIPO[ind.grafico] || EXPLICACION_POR_TIPO.area;
+  const Grafico = GRAFICOS_POR_TIPO[ind.grafico] || GRAFICOS_POR_TIPO.area;
 
   return (
     <section className="block">
@@ -689,6 +1122,7 @@ function GraficoPrincipal({ ind, d, cargando, graficoRef }) {
             <div className="block-title">{ind.nombre}</div>
             <InfoIndicador ind={ind} />
           </div>
+          <p style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 2 }}>{explicacion}</p>
           {nota && <p style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 2 }}>{nota}</p>}
         </div>
         <div style={{ marginLeft: "auto", textAlign: "right" }}>
@@ -703,27 +1137,7 @@ function GraficoPrincipal({ ind, d, cargando, graficoRef }) {
 
       <div ref={graficoRef} className="block-body" style={{ paddingTop: 18, paddingBottom: 8 }}>
         {cargando ? <Cargando alto={280} /> : d.vacio ? <SinDatos motivo={d.motivoVacio} alto={280} /> : (
-          <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={datos} margin={{ top: 4, right: 14, bottom: 0, left: 4 }}>
-              <defs>
-                <linearGradient id="gPrincipal" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={grupo.color} stopOpacity={0.2} />
-                  <stop offset="100%" stopColor={grupo.color} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="etiqueta" tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false}
-                axisLine={{ stroke: "var(--border-2)" }} minTickGap={22} />
-              <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false}
-                width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
-              <Tooltip content={<TooltipGrafico ind={ind} />} />
-              {ind.direccion === "rango" && (
-                <ReferenceArea y1={ind.objetivo[0]} y2={ind.objetivo[1]} fill="var(--green-bg)" fillOpacity={0.7} />
-              )}
-              <Area type="monotone" dataKey="actual" name="Valor" stroke={grupo.color}
-                strokeWidth={2.2} fill="url(#gPrincipal)" dot={false} isAnimationActive={false} />
-            </AreaChart>
-          </ResponsiveContainer>
+          <Grafico ind={ind} d={d} grupo={grupo} />
         )}
       </div>
     </section>
@@ -794,7 +1208,7 @@ function TablaTecnicos({ ind, d, cargando, tablaRef }) {
 }
 
 /* ==========================================================================
-   9. EXPORTACIÓN A PDF
+   10. EXPORTACIÓN A PDF
    --------------------------------------------------------------------------
    Exporta exactamente lo que el usuario tiene en pantalla en ese momento
    (categoría activa, indicador elegido, orden de tabla, período y filtros),
@@ -802,6 +1216,9 @@ function TablaTecnicos({ ind, d, cargando, tablaRef }) {
    tablas vectoriales reales, no una captura de pantalla) — el único
    contenido rasterizado es el gráfico grande, porque pdfmake no sabe dibujar
    el SVG de Recharts; se lo convierte a PNG a 3x para que no se vea pixelado.
+   Como se rasteriza el <svg> que esté montado en ese momento, el PDF sale
+   siempre con el gráfico que corresponde al indicador (barras, bandas,
+   ranking horizontal, etc.) sin ningún código extra acá.
    ========================================================================== */
 
 // dd/mm/aaaa a partir de un iso yyyy-mm-dd — el PDF exige fechas concretas,
@@ -852,7 +1269,18 @@ function svgAPng(svgVivo, escala) {
     clon.setAttribute("width", ancho);
     clon.setAttribute("height", alto);
     clon.style.fontFamily = "'IBM Plex Sans', Arial, sans-serif";
-    const cadena = new XMLSerializer().serializeToString(clon);
+    let cadena = new XMLSerializer().serializeToString(clon);
+    // El SVG serializado se carga como imagen aislada, sin acceso a las
+    // variables CSS de la página (:root) — cualquier var(--x) que haya
+    // quedado en un atributo (fill="var(--green-bg)" del ReferenceArea del
+    // rango objetivo, o los colores de respaldo por técnico) no resolvería
+    // y el navegador la pintaría negra. Se resuelven acá a su valor literal
+    // antes de serializar la imagen.
+    const raiz = getComputedStyle(document.documentElement);
+    cadena = cadena.replace(/var\(--([a-zA-Z0-9-]+)\)/g, (match, nombre) => {
+      const valor = raiz.getPropertyValue("--" + nombre).trim();
+      return valor || "#000000";
+    });
     const svg64 = "data:image/svg+xml;charset=utf-8;base64," + btoa(unescape(encodeURIComponent(cadena)));
     const img = new Image();
     img.onload = () => {
@@ -930,6 +1358,7 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
     fechaGeneracion.toLocaleDateString("es-CL") + " a las " +
     fechaGeneracion.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
   const textoCategoria = textoCategoriaActiva(grupoActivo, grupo);
+  const explicacion = EXPLICACION_POR_TIPO[ind.grafico] || EXPLICACION_POR_TIPO.area;
 
   const contenido = [
     { text: "CONTROL POSITION", fontSize: 13, bold: true, color: paleta.accent },
@@ -970,6 +1399,7 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
     : imagenGrafico
       ? {
           stack: [
+            { text: explicacion, fontSize: 8.5, italics: true, color: paleta.text3, margin: [0, 0, 0, 3] },
             { text: (esAcumulable(ind) ? "Total del período: " : "Promedio del período: ") + formatear(d.valor, ind.formato), fontSize: 9.5, color: paleta.text2, margin: [0, 0, 0, 6] },
             { image: imagenGrafico.dataUrl, fit: [500, 280], margin: [0, 0, 0, 12] },
           ],
@@ -1129,12 +1559,6 @@ function DashboardAnalisisScreen() {
           cargando={cargando} onRecargar={recargar} />
 
         <BotonesCategoria grupoActivo={grupoActivo} onCambiar={cambiarCategoria} />
-
-        {grupo && (
-          <div className="card card-pad" style={{ background: "var(--accent-softer)", borderColor: "var(--accent-soft)" }}>
-            <p style={{ fontSize: 13.5, color: "var(--accent-strong)", fontWeight: 550 }}>{grupo.pregunta}</p>
-          </div>
-        )}
 
         <div>
           <p style={{ marginBottom: 10, fontSize: 12.5, color: "var(--text-3)" }}>
