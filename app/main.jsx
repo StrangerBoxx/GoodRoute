@@ -29,6 +29,10 @@ function App() {
   const [toast, setToast] = useState(null);
   const [evidenceOT, setEvidenceOT] = useState(null);
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  // Sidebar como panel off-canvas en pantallas angostas (celular): en
+  // desktop queda siempre "abierto" (fijo en la grilla), esto solo importa
+  // por debajo del breakpoint del shell — ver .app/.side en styles.css.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     const r = document.documentElement.style;
@@ -49,6 +53,7 @@ function App() {
 
   const go = (screen, params = {}) => {
     setRoute({ screen, params });
+    setSidebarOpen(false); // navegar cierra el drawer en mobile; sin efecto en desktop
     document.querySelector(".scroll")?.scrollTo(0, 0);
   };
 
@@ -191,9 +196,9 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar route={route} go={go} counts={counts} />
+      <Sidebar route={route} go={go} counts={counts} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="main">
-        <TopBar query={query} setQuery={setQuery} go={go} onLogout={() => { setAuthed(false); }} />
+        <TopBar query={query} setQuery={setQuery} go={go} onLogout={() => { setAuthed(false); }} onMenuClick={() => setSidebarOpen(true)} />
         <div className="scroll">{content}</div>
       </div>
       {toast && <Toast msg={toast} onDone={() => setToast(null)} />}

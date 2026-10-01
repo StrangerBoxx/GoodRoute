@@ -24,7 +24,7 @@ function GoodRouteNavGroup({ route, go }) {
   );
 }
 
-function Sidebar({ route, go, counts }) {
+function Sidebar({ route, go, counts, open, onClose }) {
   const opItems = [
     { id: "dashboard", label: "Centro de control", icon: "dashboard" },
     { id: "orders", label: "Órdenes de trabajo", icon: "orders", count: counts.accion, alert: counts.accion > 0 },
@@ -32,12 +32,20 @@ function Sidebar({ route, go, counts }) {
     { id: "installations", label: "Instalaciones", icon: "install" },
   ];
   return (
-    <aside className="side">
+    <>
+      {/* En desktop el sidebar va fijo en la grilla y esto no se ve nunca
+          (solo aplica por debajo del breakpoint del shell, ver styles.css).
+          En mobile es el fondo oscuro detrás del panel — tocarlo cierra. */}
+      <div className={"side-backdrop" + (open ? " open" : "")} onClick={onClose} aria-hidden="true" />
+      <aside className={"side" + (open ? " open" : "")}>
       <div className="brand">
         <div>
           <Logo height={34} />
           <div className="brand-sub" style={{ marginTop: 6, marginLeft: 2 }}>Back office</div>
         </div>
+        <button type="button" className="side-close" onClick={onClose} aria-label="Cerrar menú">
+          <Icon name="x" />
+        </button>
       </div>
 
       <div className="nav-group-label">Operación</div>
@@ -59,11 +67,12 @@ function Sidebar({ route, go, counts }) {
       <div className="side-foot">
         <span className="badge b-green" style={{ padding: "2px 7px" }}><span className="bdot" />RedGPS conectado</span>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }
 
-function TopBar({ query, setQuery, go, onLogout }) {
+function TopBar({ query, setQuery, go, onLogout, onMenuClick }) {
   const [menu, setMenu] = useState(false);
   useEffect(() => {
     if (!menu) return;
@@ -73,6 +82,11 @@ function TopBar({ query, setQuery, go, onLogout }) {
   }, [menu]);
   return (
     <header className="topbar">
+      {/* Solo visible por debajo del breakpoint del shell — ver .menu-btn
+          en styles.css. En desktop el sidebar ya está siempre a la vista. */}
+      <button type="button" className="icon-btn menu-btn" onClick={onMenuClick} aria-label="Abrir menú">
+        <Icon name="menu" />
+      </button>
       <div className="search">
         <Icon name="search" />
         <input

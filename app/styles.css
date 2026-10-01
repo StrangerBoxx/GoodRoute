@@ -117,11 +117,16 @@ a { color: inherit; text-decoration: none; }
 *::-webkit-scrollbar-thumb:hover { background: #c2bdaf; background-clip: content-box; }
 
 /* ============ App shell ============ */
-.app { display: grid; grid-template-columns: 252px 1fr; height: 100vh; overflow: hidden; }
+.app { display: grid; grid-template-columns: 252px 1fr; height: 100vh; height: 100dvh; overflow: hidden; }
 [data-density="compact"] .app { grid-template-columns: 232px 1fr; }
 
 /* ---- Sidebar ---- */
 .side { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 18px 14px; gap: 8px; }
+.side-close { display: none; } /* visible solo en el breakpoint mobile, más abajo */
+.side-backdrop { display: none; }
+/* selector combinado (no solo .menu-btn) para ganarle en especificidad a
+   .icon-btn{display:grid}, que se define más abajo en esta hoja */
+.icon-btn.menu-btn { display: none; }
 .brand { display: flex; align-items: center; gap: 11px; padding: 6px 8px 14px; }
 .brand-mark { width: 38px; height: 38px; border-radius: 9px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-weight: 700; font-size: 15px; letter-spacing: .5px; flex: none; box-shadow: inset 0 -2px 0 rgba(0,0,0,.12); }
 .brand-name { font-weight: 600; font-size: 14.5px; letter-spacing: -.1px; line-height: 1.15; }
@@ -148,7 +153,7 @@ a { color: inherit; text-decoration: none; }
 /* ---- Main column ---- */
 .main { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .topbar { height: 62px; flex: none; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.82); backdrop-filter: blur(8px); display: flex; align-items: center; gap: 16px; padding: 0 26px; position: relative; z-index: 60; }
-.search { flex: 1; max-width: 560px; display: flex; align-items: center; gap: 9px; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 10px; padding: 8px 12px; color: var(--text-3); transition: border-color .12s, box-shadow .12s; }
+.search { flex: 1; min-width: 0; max-width: 560px; display: flex; align-items: center; gap: 9px; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 10px; padding: 8px 12px; color: var(--text-3); transition: border-color .12s, box-shadow .12s; }
 .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-softer); background: #fff; }
 .search input { border: none; outline: none; background: none; flex: 1; font-size: 13.5px; color: var(--text); }
 .search svg { width: 16px; height: 16px; }
@@ -165,6 +170,47 @@ a { color: inherit; text-decoration: none; }
 
 .scroll { flex: 1; overflow-y: auto; }
 .page { max-width: 1280px; margin: 0 auto; padding: 30px 30px 60px; }
+
+/* ---- Shell responsive: sidebar se vuelve panel off-canvas ----
+   Por debajo de este ancho (tablet chica / celular) ya no alcanza el
+   espacio para sidebar fijo + contenido a su lado — se oculta el
+   sidebar de la grilla y pasa a ser un drawer que se abre con la
+   hamburguesa del topbar, igual que .login-stage más abajo. */
+@media (max-width: 860px) {
+  .app, [data-density="compact"] .app { grid-template-columns: 1fr; }
+
+  .side {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 210;
+    width: min(84vw, 300px);
+    transform: translateX(-100%);
+    transition: transform .22s cubic-bezier(.2,.7,.3,1);
+    box-shadow: var(--shadow-pop);
+  }
+  .side.open { transform: translateX(0); }
+  .side-close {
+    display: grid; place-items: center; margin-left: auto;
+    width: 32px; height: 32px; border-radius: 9px; color: var(--text-3); flex: none;
+  }
+  .side-close:hover { background: var(--surface-3); color: var(--text); }
+  .side-close svg { width: 18px; height: 18px; }
+
+  .side-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 200;
+    background: rgba(20,15,15,.4);
+    opacity: 0; pointer-events: none; transition: opacity .18s ease;
+  }
+  .side-backdrop.open { opacity: 1; pointer-events: auto; }
+
+  .icon-btn.menu-btn { display: grid; flex: none; }
+
+  .topbar { padding: 0 14px; gap: 10px; }
+  .search { max-width: none; }
+  .user-meta { display: none; } /* queda solo el avatar — el nombre no entra */
+  .topbar-right { gap: 8px; }
+
+  .page { padding: 18px 16px 40px; }
+  .page-head { flex-wrap: wrap; }
+}
 
 /* ---- Page header ---- */
 .page-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 26px; }
