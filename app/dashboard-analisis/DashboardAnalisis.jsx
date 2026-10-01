@@ -10,9 +10,7 @@
    naturaleza (ver INDICADORES[].grafico y GRAFICOS_POR_TIPO).
 
    Esta es la ÚNICA copia conectada al proyecto — la fuente de verdad para
-   cualquier cambio futuro del dashboard. prototipos/hu-12-dashboard/ (A, B
-   y C) queda congelado como registro de la revisión que llevó a este
-   diseño; no se vuelve a tocar ni se vuelve a sincronizar desde ahí.
+   cualquier cambio futuro del dashboard.
 
    Sin bundler: Recharts y pdfmake llegan como globales UMD (agregados en
    index.html). Los íconos usan el registro compartido de app/ui.jsx, no
@@ -59,37 +57,110 @@ const USANDO_DATOS_REALES = false;
      sim           parámetros del generador de datos simulados
    ========================================================================== */
 const INDICADORES = [
+  // ---- Operación ----
+  {
+    id: "ot_asignadas",
+    nombre: "OT asignadas",
+    definicion: "Cantidad de órdenes de trabajo asignadas en el período.",
+    formula: "conteo de OT con técnico asignado",
+    fuente: "Backoffice: ID OT, fecha, técnico asignado, estado de OT, hora de asignación.",
+    unidad: "OT", formato: "ot", direccion: "contexto", granularidad: "tecnico",
+    grupo: "operacion", grafico: "barras_verticales",
+    sim: { base: 34, ruido: 0.19, tendencia: 0.13, finde: 0.24, min: 4, max: 62 },
+  },
+  {
+    id: "ot_realizadas",
+    nombre: "OT realizadas con éxito",
+    definicion: "Cantidad de OT que fueron ejecutadas y finalizadas correctamente.",
+    formula: "conteo de OT con estado final exitoso",
+    fuente: "Backoffice: ID OT, estado final, fecha de término, técnico, resultado de servicio.",
+    unidad: "OT", formato: "ot", direccion: "mas", granularidad: "tecnico",
+    grupo: "operacion", grafico: "barras_verticales",
+    sim: { base: 29, ruido: 0.17, tendencia: 0.12, finde: 0.22, min: 2, max: 55 },
+  },
+  {
+    id: "ot_pendientes",
+    nombre: "OT pendientes",
+    definicion: "Cantidad de OT que permanecen pendientes al cierre del período.",
+    formula: "conteo de OT en estado pendiente al corte",
+    fuente: "Backoffice: ID OT, estado actual, fecha programada, técnico asignado o sin asignar.",
+    unidad: "OT", formato: "ot", direccion: "menos", granularidad: "tecnico",
+    grupo: "operacion", grafico: "linea",
+    sim: { base: 6, ruido: 0.35, tendencia: -0.15, finde: 0.6, min: 0, max: 20 },
+  },
+  {
+    id: "ot_reprogramadas",
+    nombre: "OT reprogramadas",
+    definicion: "Porcentaje de OT que debieron ser reprogramadas después de haber sido asignadas.",
+    formula: "OT reprogramadas / OT asignadas",
+    fuente: "Backoffice: ID OT, fecha original, fecha nueva, motivo de reprogramación, cantidad de reprogramaciones.",
+    unidad: "%", formato: "pct", direccion: "menos", granularidad: "tecnico",
+    grupo: "operacion", grafico: "linea",
+    sim: { base: 9, ruido: 0.3, tendencia: -0.12, finde: 1.3, min: 1, max: 28 },
+  },
+  {
+    id: "cumplimiento_ventana",
+    nombre: "Cumplimiento de ventana horaria",
+    definicion: "Porcentaje de servicios realizados dentro de la ventana horaria comprometida con el cliente.",
+    formula: "servicios dentro de ventana / servicios totales",
+    fuente: "Hora inicio ventana, hora término ventana, hora de llegada del técnico, ID OT, estado de la OT.",
+    unidad: "%", formato: "pct", direccion: "mas", granularidad: "tecnico",
+    grupo: "operacion", grafico: "linea_banda_min_max",
+    sim: { base: 82, ruido: 0.08, tendencia: 0.07, finde: 0.97, min: 55, max: 98 },
+  },
+
+  // ---- Uso de recursos ----
   {
     id: "km_tecnico",
     nombre: "Kilometraje por técnico",
     definicion: "Distancia recorrida por cada técnico en el período.",
     formula: "Σ km recorridos, agrupado por técnico",
-    fuente: "GPS del vehículo (RedGPS), tramos entre paradas de la ruta.",
+    fuente: "GPS del vehículo (RedGPS): técnico, ubicación inicial, ubicación final, distancia recorrida, fecha.",
     unidad: "km", formato: "km", direccion: "menos", granularidad: "tecnico",
     grupo: "recurso", grafico: "barras_horizontales_ranking",
     sim: { base: 118, ruido: 0.14, tendencia: -0.09, finde: 0.38, min: 40, max: 210 },
   },
   {
-    id: "tasa_asignacion",
-    nombre: "Tasa de asignación",
-    definicion:
-      "Porcentaje de rutas optimizadas que el usuario aceptó sin modificar. Una ruta no modificada es un éxito del optimizador.",
-    formula: "rutas_no_modificadas / rutas_propuestas",
-    fuente: "Log de aceptación del optimizador. Ojo: hoy cuenta como modificada cualquier edición.",
-    unidad: "%", formato: "pct", direccion: "mas", granularidad: "global",
-    grupo: "optimizador", grafico: "linea",
-    sim: { base: 71, ruido: 0.11, tendencia: 0.16, finde: 0.94, min: 40, max: 96 },
+    id: "tiempo_traslado",
+    nombre: "Tiempo de traslado",
+    definicion: "Tiempo promedio de traslado entre una OT y la siguiente.",
+    formula: "promedio(hora de llegada siguiente OT − hora de término de la OT anterior)",
+    fuente: "Hora de término y ubicación de la OT anterior; hora de llegada y ubicación de la siguiente OT; técnico.",
+    unidad: "min", formato: "min", direccion: "menos", granularidad: "tecnico",
+    grupo: "recurso", grafico: "linea_banda_min_max",
+    sim: { base: 22, ruido: 0.2, tendencia: -0.08, finde: 0.85, min: 8, max: 55 },
   },
   {
-    id: "saturacion",
-    nombre: "Saturación de turnos",
-    definicion:
-      "Porcentaje del turno de un técnico interno efectivamente comprometido en traslados y atención de OT, frente al tiempo inactivo.",
-    formula: "(tiempo_traslado + tiempo_atencion) / duracion_turno",
-    fuente: "Marcas de inicio y cierre de OT en la app del técnico + tramos GPS.",
+    id: "utilizacion_jornada",
+    nombre: "Utilización de jornada",
+    definicion: "Porcentaje de la jornada disponible de un técnico utilizado en OT y desplazamientos planificados.",
+    formula: "(tiempo en OT + tiempo de traslado planificado) / duración de la jornada",
+    fuente: "Hora de inicio y término de jornada, duración de OT, tiempo de espera, técnico.",
     unidad: "%", formato: "pct", direccion: "rango", objetivo: [75, 88],
     granularidad: "tecnico", grupo: "recurso", grafico: "linea_banda_min_max",
     sim: { base: 80, ruido: 0.09, tendencia: 0.09, finde: 0.96, min: 45, max: 97 },
+  },
+  {
+    id: "tiempo_servicio",
+    nombre: "Tiempo promedio de servicio",
+    definicion: "Cuánto demora realmente un técnico desde que inicia hasta que termina una OT.",
+    formula: "promedio(hora de término de la OT − hora de inicio de la OT)",
+    fuente: "Hora de inicio y término de la OT, ID OT, tipo de servicio, técnico.",
+    unidad: "min", formato: "min", direccion: "menos", granularidad: "tecnico",
+    grupo: "recurso", grafico: "linea_banda_min_max",
+    sim: { base: 38, ruido: 0.18, tendencia: -0.05, finde: 1.1, min: 15, max: 90 },
+  },
+
+  // ---- Optimización ----
+  {
+    id: "tasa_aceptacion_rutas",
+    nombre: "Tasa de aceptación de rutas",
+    definicion: "Porcentaje de rutas propuestas por el optimizador que Operaciones aceptó sin modificar.",
+    formula: "rutas no modificadas / rutas propuestas",
+    fuente: "Registro de modificaciones sobre rutas optimizadas: ID ruta, ruta propuesta, ruta modificada o no, fecha, usuario.",
+    unidad: "%", formato: "pct", direccion: "mas", granularidad: "global",
+    grupo: "optimizacion", grafico: "linea",
+    sim: { base: 71, ruido: 0.11, tendencia: 0.16, finde: 0.94, min: 40, max: 96 },
   },
   {
     id: "insercion_vivo",
@@ -97,82 +168,38 @@ const INDICADORES = [
     definicion:
       "Porcentaje de OT nuevas que logran integrarse de forma factible en jornadas ya iniciadas, sin alterar los compromisos existentes de la ruta.",
     formula: "OT_insertadas_factibles / OT_nuevas_solicitadas",
-    fuente: "Motor de reoptimización, eventos de inserción durante la jornada.",
+    fuente: "ID OT nueva, hora de creación, técnico asignado, ruta existente, posibilidad de inserción, ruta modificada o no, resultado.",
     unidad: "%", formato: "pct", direccion: "mas", granularidad: "global",
-    grupo: "optimizador", grafico: "barras_apiladas_linea_secundaria",
+    grupo: "optimizacion", grafico: "barras_apiladas_linea_secundaria",
     sim: { base: 63, ruido: 0.17, tendencia: 0.21, finde: 0.7, min: 20, max: 92 },
   },
   {
-    id: "ot_asignadas",
-    nombre: "OT asignadas",
-    definicion: "Cantidad de órdenes de trabajo asignadas en el período.",
-    formula: "conteo de OT con técnico asignado",
-    fuente: "Backoffice Control Position, tabla de órdenes de trabajo.",
-    unidad: "OT", formato: "ot", direccion: "contexto", granularidad: "tecnico",
-    grupo: "recurso", grafico: "barras_verticales",
-    sim: { base: 34, ruido: 0.19, tendencia: 0.13, finde: 0.24, min: 4, max: 62 },
-  },
-  {
     id: "dist_optimizada",
-    nombre: "Distancia total optimizada",
+    nombre: "Reducción de distancia / km ahorrados",
     definicion:
       "Kilómetros ahorrados por la ruta optimizada respecto de la línea base (asignación manual o secuencial).",
     formula: "km_baseline − km_optimizados",
-    fuente: "Comparación contra ruta secuencial por orden de ingreso. Línea base por acordar.",
+    fuente: "Km de planificación manual o base, km de la ruta optimizada, ID ruta, fecha. Línea base por acordar.",
     unidad: "km", formato: "km", direccion: "mas", granularidad: "tecnico",
-    grupo: "optimizador", grafico: "barras_verticales",
+    grupo: "optimizacion", grafico: "barras_verticales",
     sim: { base: 96, ruido: 0.21, tendencia: 0.24, finde: 0.3, min: 15, max: 220 },
   },
   {
-    id: "dinero_ahorrado",
-    nombre: "Dinero ahorrado",
-    definicion: "Valorización monetaria del ahorro en distancia y tiempo.",
-    formula: "km_ahorrados × costo_km + horas_ahorradas × costo_hora_tecnico",
-    fuente: "Indicador derivado. Depende de la misma línea base que la distancia optimizada.",
-    unidad: "$", formato: "clp", direccion: "mas", granularidad: "tecnico",
-    grupo: "economicos", grafico: "area_acumulada",
-    sim: { base: 268000, ruido: 0.22, tendencia: 0.26, finde: 0.28, min: 40000, max: 620000 },
-  },
-  {
-    id: "costo_inactividad",
-    nombre: "Costo de oportunidad por inactividad",
-    definicion:
-      "Valor monetario de los tiempos muertos cuando un técnico llega antes y debe esperar en el vehículo a que abra la ventana horaria del cliente.",
-    formula: "Σ minutos_espera_en_sitio × costo_minuto_tecnico",
-    fuente: "Diferencia entre llegada GPS e inicio de OT en la app, × costo minuto.",
-    unidad: "$", formato: "clp", direccion: "menos", granularidad: "tecnico",
-    grupo: "economicos", grafico: "barras_apiladas_tecnico",
-    sim: { base: 84000, ruido: 0.24, tendencia: -0.19, finde: 0.3, min: 12000, max: 210000 },
-  },
-  {
-    id: "costo_por_ot",
-    nombre: "Costo operativo por OT",
-    definicion:
-      "Valor del tiempo del técnico más el costo de combustible por kilómetro, dividido por las instalaciones exitosas del día.",
-    formula: "(horas × costo_hora + km × costo_km) / instalaciones_exitosas",
-    fuente: "Nómina + consumo de combustible + cierres exitosos del día.",
-    unidad: "$/OT", formato: "clpOT", direccion: "menos", granularidad: "tecnico",
-    grupo: "economicos", grafico: "linea_barras_fondo",
-    sim: { base: 12400, ruido: 0.13, tendencia: -0.11, finde: 1.28, min: 6500, max: 21000 },
-  },
-  {
-    id: "espera_cliente",
-    nombre: "Tiempo medio de espera del cliente",
-    definicion:
-      "Promedio de minutos entre el inicio de la ventana horaria acordada y la llegada efectiva del técnico.",
-    formula: "promedio(hora_llegada − inicio_ventana)",
-    fuente: "Llegada GPS vs. ventana pactada. Las llegadas anticipadas hoy se cuentan como cero.",
-    unidad: "min", formato: "min", direccion: "menos", granularidad: "tecnico",
-    grupo: "cliente", grafico: "linea_banda_percentiles",
-    sim: { base: 17, ruido: 0.19, tendencia: -0.16, finde: 1.15, min: 3, max: 42 },
+    id: "tiempo_planificacion",
+    nombre: "Tiempo de planificación",
+    definicion: "Tiempo promedio que Operaciones demora en planificar o asignar una jornada.",
+    formula: "promedio(hora de término de planificación − hora de inicio de planificación)",
+    fuente: "Hora de inicio y término de planificación, fecha, usuario, cantidad de OT planificadas.",
+    unidad: "min", formato: "min", direccion: "menos", granularidad: "global",
+    grupo: "optimizacion",
+    sim: { base: 45, ruido: 0.22, tendencia: -0.2, finde: 0.5, min: 8, max: 95 },
   },
 ];
 
 const GRUPOS = [
-  { id: "optimizador", nombre: "Desempeño del optimizador", color: "#033E84" },
-  { id: "recurso", nombre: "Uso del recurso técnico", color: "#e07419" },
-  { id: "economicos", nombre: "Económicos", color: "#1c6e44" },
-  { id: "cliente", nombre: "Experiencia del cliente", color: "#7c54c9" },
+  { id: "operacion", nombre: "Operación", color: "#033E84" },
+  { id: "recurso", nombre: "Uso de recursos", color: "#e07419" },
+  { id: "optimizacion", nombre: "Optimización", color: "#1c6e44" },
 ];
 
 /* ==========================================================================
@@ -202,18 +229,15 @@ const TIPOS_OT = ["Instalación", "Mantención", "Retiro", "Revisión en terreno
        serie: [{
          iso, etiqueta, valor,        // siempre
          min, max,                    // sólo si ind.grafico === "linea_banda_min_max"
-         mediana, p25, p75,           // sólo si ind.grafico === "linea_banda_percentiles"
          insertadas, rechazadas,      // sólo si ind.grafico === "barras_apiladas_linea_secundaria"
-         volumenOt,                   // sólo si ind.grafico === "linea_barras_fondo"
        }],
        anterior: [{ iso, etiqueta, valor }]   período inmediatamente previo
        porTecnico: [{ id, nombre, zona, tipo, valor }]   agregado del período completo (sin cambios)
        porTecnicoDia: [{ id, nombre, zona, tipo, dias: [{ iso, etiqueta, valor }] }]
-                       opcional — sólo si ind.grafico === "barras_horizontales_ranking"
-                       | "barras_apiladas_tecnico". Es el desglose día a día por
-                       técnico que esos dos gráficos necesitan (porTecnico sólo
-                       trae un valor agregado para todo el período, no sirve
-                       para una barra apilada por día).
+                       opcional — sólo si ind.grafico === "barras_horizontales_ranking".
+                       Es el desglose día a día por técnico que ese gráfico
+                       necesita (porTecnico sólo trae un valor agregado para
+                       todo el período, no sirve para un ranking por día).
        vacio:    boolean  -> true cuando la combinación de filtros no tiene dato
        motivoVacio: string
      }
@@ -223,7 +247,7 @@ const TIPOS_OT = ["Instalación", "Mantención", "Retiro", "Revisión en terreno
    los campos que el "grafico" de cada indicador efectivamente usa.
    ========================================================================== */
 
-// Hoy fijo: el prototipo del Sprint 1 opera sobre el lunes 1 de junio de 2026.
+// Hoy fijo: el sistema opera sobre el lunes 1 de junio de 2026.
 const HOY = new Date(2026, 5, 1);
 
 function mulberry32(a) {
@@ -288,22 +312,13 @@ function valorDelDia(ind, fecha, filtros) {
 
 // Valor simulado de un indicador para UN técnico en UN día — perturba
 // valorDelDia con el factor estable de ese técnico. Es la base de
-// porTecnicoDia y de las bandas min/máx y percentiles (que necesitan un
-// valor por técnico, no sólo el agregado del día).
+// porTecnicoDia y de la banda min/máx (que necesitan un valor por
+// técnico, no sólo el agregado del día).
 function valorDelDiaTecnico(ind, fecha, filtros, tecnico) {
   const base = valorDelDia(ind, fecha, filtros);
   const semilla = hash(ind.id + "|tecnico|" + tecnico.id + "|" + iso(fecha));
   const r = mulberry32(semilla)();
   return Math.max(ind.sim.min, base * tecnicoFactor(tecnico.id) * (0.85 + r * 0.3));
-}
-
-// Percentil por interpolación lineal sobre un array YA ordenado ascendente.
-function percentil(valoresOrdenados, p) {
-  if (!valoresOrdenados.length) return null;
-  const idx = (valoresOrdenados.length - 1) * p;
-  const lo = Math.floor(idx), hi = Math.ceil(idx);
-  if (lo === hi) return valoresOrdenados[lo];
-  return valoresOrdenados[lo] + (valoresOrdenados[hi] - valoresOrdenados[lo]) * (idx - lo);
 }
 
 // Solicitudes de inserción en vivo ese día (denominador de la tasa) — sin
@@ -314,25 +329,12 @@ function solicitudesDelDia(fecha, filtros) {
   return Math.round(4 + r * 38);
 }
 
-// Volumen de OT del día — denominador de costo_por_ot. En días de poco
-// volumen el costo por OT se dispara aunque nada haya empeorado; sin ver
-// el volumen ese pico se malinterpreta.
-function volumenOtDelDia(fecha, filtros) {
-  const semilla = hash("costo_por_ot_volumen|" + iso(fecha) + "|" + filtros.zona + "|" + filtros.tipoOT);
-  const r = mulberry32(semilla)();
-  const dow = fecha.getDay();
-  const finde = dow === 0 || dow === 6;
-  let v = 5 + r * 22;
-  if (finde) v *= 0.35;
-  return Math.max(1, Math.round(v));
-}
-
 function obtenerSerie(indicadorId, rango, filtros) {
   /* ---- INICIO DEL CUERPO REEMPLAZABLE ---------------------------------- */
   const ind = INDICADORES.find((x) => x.id === indicadorId);
   if (!ind) return { serie: [], anterior: [], porTecnico: [], vacio: true, motivoVacio: "Indicador no encontrado." };
 
-  // Regla honesta del prototipo: los indicadores de nivel sistema no se
+  // Regla honesta del producto: los indicadores de nivel sistema no se
   // desagregan por técnico, así que filtrar por uno deja el gráfico sin dato.
   if (ind.granularidad === "global" && filtros.tecnico !== "todos") {
     return {
@@ -367,20 +369,11 @@ function obtenerSerie(indicadorId, rango, filtros) {
       punto.min = valores[0];
       punto.max = valores[valores.length - 1];
     }
-    if (ind.grafico === "linea_banda_percentiles" && candidatos.length) {
-      const valores = candidatos.map((t) => valorDelDiaTecnico(ind, d, filtros, t)).sort((a, b) => a - b);
-      punto.mediana = percentil(valores, 0.5);
-      punto.p25 = percentil(valores, 0.25);
-      punto.p75 = percentil(valores, 0.75);
-    }
     if (ind.grafico === "barras_apiladas_linea_secundaria") {
       const solicitudes = solicitudesDelDia(d, filtros);
       const insertadas = Math.round(solicitudes * (punto.valor / 100));
       punto.insertadas = insertadas;
       punto.rechazadas = Math.max(0, solicitudes - insertadas);
-    }
-    if (ind.grafico === "linea_barras_fondo") {
-      punto.volumenOt = volumenOtDelDia(d, filtros);
     }
     return punto;
   });
@@ -406,11 +399,11 @@ function obtenerSerie(indicadorId, rango, filtros) {
     };
   });
 
-  // Desglose día a día por técnico — sólo para los dos gráficos que lo
-  // necesitan (el ranking horizontal y las barras apiladas por técnico).
-  // El resto de los indicadores no paga el costo de calcularlo.
+  // Desglose día a día por técnico — sólo para el ranking horizontal, que
+  // es el único gráfico que lo necesita. El resto de los indicadores no
+  // paga el costo de calcularlo.
   let porTecnicoDia;
-  if (ind.grafico === "barras_horizontales_ranking" || ind.grafico === "barras_apiladas_tecnico") {
+  if (ind.grafico === "barras_horizontales_ranking") {
     porTecnicoDia = candidatos.map((t) => ({
       id: t.id, nombre: CP_DATA.tnombre(t), zona: t.zona, tipo: t.tipo,
       dias: dias.map((d) => ({
@@ -455,7 +448,7 @@ const promedio = (arr) => (arr.length ? arr.reduce((a, b) => a + b.valor, 0) / a
 const suma = (arr) => arr.reduce((a, b) => a + b.valor, 0);
 
 // Los indicadores de conteo y de ahorro se leen como total; el resto, como promedio.
-const esAcumulable = (ind) => ["ot_asignadas", "dinero_ahorrado", "costo_inactividad", "dist_optimizada"].includes(ind.id);
+const esAcumulable = (ind) => ["ot_asignadas", "ot_realizadas", "dist_optimizada"].includes(ind.id);
 const valorRepresentativo = (ind, serie) =>
   serie.length === 0 ? null : esAcumulable(ind) ? suma(serie) : promedio(serie);
 
@@ -794,8 +787,9 @@ function GraficoArea({ ind, d, grupo }) {
   );
 }
 
-// tasa_asignacion: línea sin relleno — es una tasa continua, el área bajo
-// una curva de porcentaje no significa nada.
+// tasa_aceptacion_rutas, ot_pendientes, ot_reprogramadas: línea sin
+// relleno — son tasas o niveles continuos, el área bajo la curva no
+// representa ninguna cantidad real.
 function GraficoLinea({ ind, d, grupo }) {
   const datos = d.serie.map((p) => ({ etiqueta: p.etiqueta, valor: p.valor }));
   return (
@@ -812,10 +806,11 @@ function GraficoLinea({ ind, d, grupo }) {
   );
 }
 
-// saturacion: promedio + banda sombreada entre el mínimo y el máximo entre
-// técnicos ese día. La dispersión es el hallazgo: 81% de promedio puede ser
-// todos en 81, o uno en 98 y otro en 60. Mantiene la banda verde del rango
-// objetivo (criterio acordado, no comparación temporal).
+// utilizacion_jornada, cumplimiento_ventana, tiempo_traslado, tiempo_servicio:
+// promedio + banda sombreada entre el mínimo y el máximo entre técnicos ese
+// día. La dispersión es el hallazgo: 81% de promedio puede ser todos en 81,
+// o uno en 98 y otro en 60. Mantiene la banda verde del rango objetivo
+// cuando el indicador la declara (criterio acordado, no comparación temporal).
 function GraficoBandaMinMax({ ind, d, grupo }) {
   const datos = d.serie.map((p) => ({
     etiqueta: p.etiqueta, valor: p.valor,
@@ -833,31 +828,6 @@ function GraficoBandaMinMax({ ind, d, grupo }) {
         <Area type="monotone" dataKey="min" stackId="banda" stroke="none" fill="none" isAnimationActive={false} />
         <Area type="monotone" dataKey="rango" stackId="banda" name="Rango entre técnicos" stroke="none" fill={grupo.color} fillOpacity={0.16} isAnimationActive={false} />
         <Line type="monotone" dataKey="valor" name="Promedio" stroke={grupo.color} strokeWidth={2.2} dot={false} isAnimationActive={false} />
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
-}
-
-// espera_cliente: mediana + banda entre percentil 25 y 75. El promedio acá
-// es engañoso: 16 minutos puede ser todos esperando 16, o casi todos en 5
-// y unos pocos en 90 — los que reclaman son la cola, y el promedio la borra.
-function GraficoBandaPercentiles({ ind, d, grupo }) {
-  const datos = d.serie.map((p) => ({
-    etiqueta: p.etiqueta,
-    valor: p.mediana != null ? p.mediana : p.valor,
-    min: p.p25 != null ? p.p25 : p.valor,
-    rango: p.p25 != null && p.p75 != null ? Math.max(0, p.p75 - p.p25) : 0,
-  }));
-  return (
-    <ResponsiveContainer width="100%" height={280}>
-      <ComposedChart data={datos} margin={MARGEN_GRAFICO}>
-        <CartesianGrid stroke="var(--border)" vertical={false} />
-        <XAxis dataKey="etiqueta" {...EJE_X} />
-        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
-        <Tooltip content={<TooltipBanda ind={ind} etiquetaCentral="Mediana" etiquetaBanda="Percentil 25 a 75" />} />
-        <Area type="monotone" dataKey="min" stackId="banda" stroke="none" fill="none" isAnimationActive={false} />
-        <Area type="monotone" dataKey="rango" stackId="banda" name="Percentil 25 a 75" stroke="none" fill={grupo.color} fillOpacity={0.16} isAnimationActive={false} />
-        <Line type="monotone" dataKey="valor" name="Mediana" stroke={grupo.color} strokeWidth={2.2} dot={false} isAnimationActive={false} />
       </ComposedChart>
     </ResponsiveContainer>
   );
@@ -906,81 +876,6 @@ function GraficoBarras({ ind, d, grupo }) {
   );
 }
 
-// dinero_ahorrado: área ACUMULADA — la pregunta de un piloto es cuánto
-// llevamos ahorrado, no cuánto se ahorró el martes. Único caso donde el
-// relleno es correcto: el área sí representa una cantidad acumulada.
-function GraficoAreaAcumulada({ ind, d, grupo }) {
-  let acumulado = 0;
-  const datos = d.serie.map((p) => { acumulado += p.valor; return { etiqueta: p.etiqueta, valor: acumulado }; });
-  return (
-    <ResponsiveContainer width="100%" height={280}>
-      <AreaChart data={datos} margin={MARGEN_GRAFICO}>
-        <defs>
-          <linearGradient id="gAcum" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={grupo.color} stopOpacity={0.25} />
-            <stop offset="100%" stopColor={grupo.color} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid stroke="var(--border)" vertical={false} />
-        <XAxis dataKey="etiqueta" {...EJE_X} />
-        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
-        <Tooltip content={<TooltipGrafico ind={ind} />} />
-        <Area type="monotone" dataKey="valor" name="Acumulado" stroke={grupo.color} strokeWidth={2.2} fill="url(#gAcum)" dot={false} isAnimationActive={false} />
-      </AreaChart>
-    </ResponsiveContainer>
-  );
-}
-
-// costo_inactividad: barras apiladas por técnico — flujo diario cuya acción
-// correctiva es sobre una persona puntual, no sobre el total.
-function GraficoBarrasTecnico({ ind, d }) {
-  const porTecnicoDia = d.porTecnicoDia || [];
-  if (!porTecnicoDia.length) return <SinDatos motivo="No hay técnicos para desglosar en este período." alto={280} />;
-  const nDias = porTecnicoDia[0].dias.length;
-  const datos = Array.from({ length: nDias }, (_, i) => {
-    const fila = { etiqueta: porTecnicoDia[0].dias[i].etiqueta };
-    porTecnicoDia.forEach((t) => { fila[t.id] = t.dias[i].valor; });
-    return fila;
-  });
-  const coloresRespaldo = ["var(--accent)", "var(--green-dot)", "var(--orange-dot)", "var(--violet-dot)", "var(--teal-dot)", "var(--slate-dot)"];
-  return (
-    <ResponsiveContainer width="100%" height={280}>
-      <ComposedChart data={datos} margin={MARGEN_GRAFICO}>
-        <CartesianGrid stroke="var(--border)" vertical={false} />
-        <XAxis dataKey="etiqueta" {...EJE_X} />
-        <YAxis tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
-        <Tooltip content={<TooltipGrafico ind={ind} />} />
-        {porTecnicoDia.map((t, i) => {
-          const real = CP_DATA.techById[t.id];
-          const color = (real && real.color) || coloresRespaldo[i % coloresRespaldo.length];
-          return <Bar key={t.id} dataKey={t.id} name={t.nombre} stackId="costo" fill={color} isAnimationActive={false} />;
-        })}
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
-}
-
-// costo_por_ot: línea del costo, con el volumen de OT del día de fondo en
-// un eje secundario. Es un cociente: en días de poco volumen el
-// denominador se achica y el costo se dispara sin que nada haya empeorado.
-function GraficoLineaVolumen({ ind, d, grupo }) {
-  const datos = d.serie.map((p) => ({ etiqueta: p.etiqueta, valor: p.valor, volumenOt: p.volumenOt || 0 }));
-  const formatos = { valor: (v) => formatear(v, ind.formato), volumenOt: (v) => nf(v, 0) + " OT" };
-  return (
-    <ResponsiveContainer width="100%" height={280}>
-      <ComposedChart data={datos} margin={MARGEN_GRAFICO}>
-        <CartesianGrid stroke="var(--border)" vertical={false} />
-        <XAxis dataKey="etiqueta" {...EJE_X} />
-        <YAxis yAxisId="izq" tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={62} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
-        <YAxis yAxisId="der" orientation="right" tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={36} tickFormatter={(v) => nf(v, 0)} />
-        <Tooltip content={<TooltipMixto formatoPorClave={formatos} />} />
-        <Bar yAxisId="der" dataKey="volumenOt" name="OT del día" fill="var(--border-3)" fillOpacity={0.7} isAnimationActive={false} />
-        <Line yAxisId="izq" type="monotone" dataKey="valor" name="Costo por OT" stroke={grupo.color} strokeWidth={2.2} dot={false} isAnimationActive={false} />
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
-}
-
 // km_tecnico: ranking horizontal — la pregunta es quién recorre de más, no
 // cómo evolucionó el total. Un valor por técnico (promedio del período,
 // mismo criterio que el resto de la pantalla para este indicador),
@@ -1005,30 +900,22 @@ function GraficoBarrasHorizontales({ ind, d, grupo }) {
 }
 
 // Único punto que sabe qué componente corresponde a cada "grafico" — y la
-// frase corta que explica qué se está mostrando (CAMBIO 5). Un indicador
-// nuevo con un "grafico" existente hereda ambos solo con aparecer acá.
+// frase corta que explica qué se está mostrando. Un indicador nuevo con
+// un "grafico" existente hereda ambos solo con aparecer acá.
 const GRAFICOS_POR_TIPO = {
   area: GraficoArea,
   linea: GraficoLinea,
   linea_banda_min_max: GraficoBandaMinMax,
-  linea_banda_percentiles: GraficoBandaPercentiles,
   barras_apiladas_linea_secundaria: GraficoBarrasStackLinea,
   barras_verticales: GraficoBarras,
-  area_acumulada: GraficoAreaAcumulada,
-  barras_apiladas_tecnico: GraficoBarrasTecnico,
-  linea_barras_fondo: GraficoLineaVolumen,
   barras_horizontales_ranking: GraficoBarrasHorizontales,
 };
 const EXPLICACION_POR_TIPO = {
   area: "evolución diaria",
   linea: "evolución diaria",
   linea_banda_min_max: "promedio con mínimo y máximo entre técnicos",
-  linea_banda_percentiles: "mediana y rango intercuartil (percentil 25 a 75)",
   barras_apiladas_linea_secundaria: "insertadas y rechazadas por día, con la tasa",
   barras_verticales: "total diario",
-  area_acumulada: "acumulado del período",
-  barras_apiladas_tecnico: "desglose diario por técnico",
-  linea_barras_fondo: "costo por OT, con el volumen del día de referencia",
   barras_horizontales_ranking: "promedio del período por técnico, de mayor a menor",
 };
 
@@ -1473,6 +1360,126 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
 }
 
 /* ==========================================================================
+   11. EXPORTACIÓN A EXCEL
+   --------------------------------------------------------------------------
+   Mismo criterio que el PDF: exporta exactamente lo que el usuario tiene en
+   pantalla (categoría activa, indicador elegido, orden de tabla, filtros),
+   no un volcado de toda la base. Tres hojas: indicadores de la categoría
+   activa, serie diaria del indicador elegido (con su gráfico incrustado
+   como imagen — ExcelJS no arma gráficos nativos de Excel desde el
+   navegador sin un backend, así que se reusa el mismo PNG rasterizado que
+   ya construye svgAPng para el PDF) y el detalle por técnico tal como está
+   ordenado en pantalla.
+   ========================================================================== */
+
+// ExcelJS pide color ARGB (8 hex: alpha + rgb); el sistema de diseño da
+// hex de 6 — se antepone el canal alpha en opaco.
+function argbExcel(hex) {
+  return "FF" + hex.replace("#", "").toUpperCase();
+}
+
+function numFmtExcel(formato) {
+  switch (formato) {
+    case "pct": return '0.0"%"';
+    case "clp": case "clpOT": return '"$"#,##0';
+    default: return "#,##0";
+  }
+}
+
+async function construirLibroExcel({ grupo, delGrupo, ind, datos, imagenGrafico, filasTabla }) {
+  const wb = new window.ExcelJS.Workbook();
+  wb.creator = "Control Position";
+  wb.created = new Date();
+
+  const colorCategoria = argbExcel((grupo && grupo.color) || "#033E84");
+  const estiloEncabezado = (ws) => {
+    const fila = ws.getRow(1);
+    fila.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    fila.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colorCategoria } };
+  };
+
+  // ---- Hoja 1: indicadores de la categoría activa ----
+  const wsResumen = wb.addWorksheet("Indicadores");
+  wsResumen.columns = [
+    { header: "Indicador", key: "nombre", width: 34 },
+    { header: "Valor", key: "valor", width: 16 },
+    { header: "Dirección", key: "direccion", width: 40 },
+  ];
+  delGrupo.forEach((i) => {
+    const d = datos[i.id];
+    wsResumen.addRow({
+      nombre: i.nombre,
+      valor: d.vacio ? "—" : formatear(d.valor, i.formato),
+      direccion: d.vacio ? "Sin datos con los filtros actuales" : direccionTexto(i),
+    });
+  });
+  estiloEncabezado(wsResumen);
+
+  // ---- Hoja 2: serie diaria del indicador elegido, con el gráfico ----
+  const wsSerie = wb.addWorksheet("Serie diaria");
+  const d = datos[ind.id];
+  const tieneBanda = ind.grafico === "linea_banda_min_max";
+  const tieneInsercion = ind.grafico === "barras_apiladas_linea_secundaria";
+  const columnasBase = [
+    { header: "Fecha", key: "etiqueta", width: 12 },
+    { header: ind.nombre + " (" + ind.unidad + ")", key: "valor", width: 26 },
+  ];
+  if (tieneBanda) {
+    columnasBase.push({ header: "Mínimo entre técnicos", key: "min", width: 22 });
+    columnasBase.push({ header: "Máximo entre técnicos", key: "max", width: 22 });
+  }
+  if (tieneInsercion) {
+    columnasBase.push({ header: "Insertadas", key: "insertadas", width: 14 });
+    columnasBase.push({ header: "Rechazadas", key: "rechazadas", width: 14 });
+  }
+  wsSerie.columns = columnasBase;
+  if (d.vacio || !d.serie.length) {
+    wsSerie.addRow({ etiqueta: "Sin datos con los filtros actuales." });
+  } else {
+    d.serie.forEach((p) => {
+      wsSerie.addRow({
+        etiqueta: p.etiqueta, valor: Number(p.valor.toFixed(2)),
+        min: p.min != null ? Number(p.min.toFixed(2)) : undefined,
+        max: p.max != null ? Number(p.max.toFixed(2)) : undefined,
+        insertadas: p.insertadas, rechazadas: p.rechazadas,
+      });
+    });
+    wsSerie.getColumn("valor").numFmt = numFmtExcel(ind.formato);
+    if (tieneBanda) {
+      wsSerie.getColumn("min").numFmt = numFmtExcel(ind.formato);
+      wsSerie.getColumn("max").numFmt = numFmtExcel(ind.formato);
+    }
+  }
+  estiloEncabezado(wsSerie);
+
+  if (imagenGrafico) {
+    const base64 = imagenGrafico.dataUrl.split(",")[1];
+    const imageId = wb.addImage({ base64, extension: "png" });
+    wsSerie.addImage(imageId, {
+      tl: { col: columnasBase.length + 1, row: 0 },
+      ext: { width: imagenGrafico.width, height: imagenGrafico.height },
+    });
+  }
+
+  // ---- Hoja 3: detalle por técnico, tal como está ordenado en pantalla ----
+  const wsDetalle = wb.addWorksheet("Detalle por técnico");
+  wsDetalle.columns = [
+    { header: "Técnico", key: "nombre", width: 26 },
+    { header: "Comuna", key: "zona", width: 16 },
+    { header: "Vínculo", key: "tipo", width: 12 },
+    { header: ind.unidad.toUpperCase(), key: "valor", width: 16 },
+  ];
+  if (!filasTabla.length) {
+    wsDetalle.addRow({ nombre: "Sin datos con los filtros actuales." });
+  } else {
+    filasTabla.forEach((f) => wsDetalle.addRow({ nombre: f[0], zona: f[1], tipo: f[2], valor: f[3] }));
+  }
+  estiloEncabezado(wsDetalle);
+
+  return wb.xlsx.writeBuffer();
+}
+
+/* ==========================================================================
    PANTALLA — montada por app/main.jsx en route.screen === "analisis"
    ========================================================================== */
 function DashboardAnalisisScreen() {
@@ -1536,6 +1543,44 @@ function DashboardAnalisisScreen() {
     }
   };
 
+  const [generandoExcel, setGenerandoExcel] = useState(false);
+  const [errorExcel, setErrorExcel] = useState(null);
+
+  const descargarExcel = async () => {
+    setGenerandoExcel(true);
+    setErrorExcel(null);
+    try {
+      const d = ind ? datos[ind.id] : null;
+      if (!d) throw new Error("No hay un indicador seleccionado.");
+
+      const conSerie = Object.values(datos).find((x) => x.serie && x.serie.length) || d;
+      if (!conSerie.serie.length) throw new Error("El período elegido no tiene días para exportar.");
+      const fechaInicioISO = conSerie.serie[0].iso;
+      const fechaFinISO = conSerie.serie[conSerie.serie.length - 1].iso;
+
+      let imagenGrafico = null;
+      if (!d.vacio && graficoRef.current) {
+        const svg = graficoRef.current.querySelector("svg");
+        if (svg) imagenGrafico = await svgAPng(svg, 3);
+      }
+      const filasTabla = leerFilasTabla(tablaRef);
+
+      const buffer = await construirLibroExcel({ grupo, delGrupo, ind, datos, imagenGrafico, filasTabla });
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const nombreArchivo = "analisis-" + grupoActivo + "-" + fechaInicioISO + "-al-" + fechaFinISO + ".xlsx";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = nombreArchivo;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Error generando el Excel de análisis:", err);
+      setErrorExcel("No se pudo generar el Excel. Probá de nuevo.");
+    } finally {
+      setGenerandoExcel(false);
+    }
+  };
+
   return (
     <div className="page fade-in">
       <div className="page-head">
@@ -1545,6 +1590,12 @@ function DashboardAnalisisScreen() {
         </div>
         <div className="page-head-actions">
           <AvisoDatoSimulado />
+          {errorExcel && <span style={{ fontSize: 12, color: "var(--red-fg)" }}>{errorExcel}</span>}
+          <button type="button" onClick={descargarExcel} disabled={generandoExcel || cargando} className="btn"
+            style={{ opacity: generandoExcel || cargando ? 0.6 : 1, cursor: generandoExcel || cargando ? "not-allowed" : "pointer" }}>
+            <span className={generandoExcel ? "icon-spin" : ""}><Icon name={generandoExcel ? "refresh" : "download"} /></span>
+            {generandoExcel ? "Generando…" : "Descargar Excel"}
+          </button>
           {errorPdf && <span style={{ fontSize: 12, color: "var(--red-fg)" }}>{errorPdf}</span>}
           <button type="button" onClick={descargarPdf} disabled={generandoPdf || cargando} className="btn"
             style={{ opacity: generandoPdf || cargando ? 0.6 : 1, cursor: generandoPdf || cargando ? "not-allowed" : "pointer" }}>
