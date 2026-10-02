@@ -6,6 +6,7 @@ function Settings({ initialSection }) {
   const nav = [
     { id: "cuenta", label: "Datos de la cuenta", icon: "building" },
     { id: "password", label: "Cambiar contraseña", icon: "lock" },
+    { id: "optimizador", label: "Configuración del optimizador", icon: "sliders" },
   ];
 
   return (
@@ -69,6 +70,8 @@ function Settings({ initialSection }) {
               </div>
             </div>
           )}
+
+          {sec === "optimizador" && <ConfiguracionOptimizador />}
 
         </div>
       </div>

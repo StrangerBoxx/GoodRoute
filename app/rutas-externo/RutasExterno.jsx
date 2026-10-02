@@ -27,6 +27,8 @@ const RX_KEYS = {
   otsSel: "rutasExterno.otsSel",
   tecSel: "rutasExterno.tecSel",
   propuesta: "rutasExterno.propuesta",
+  propuestaOriginal: "rutasExterno.propuestaOriginal",
+  generadoEn: "rutasExterno.generadoEn",
   confirmados: "rutasExterno.confirmados",
 };
 function rxLoad(key, fallback) {
@@ -43,6 +45,144 @@ function rxSave(key, value) {
 function fechaDDMMYYYY(iso) {
   const [y, m, d] = iso.split("-");
   return `${d}-${m}-${y}`;
+}
+
+// Las horas que entrega el backend vienen 3 horas adelantadas respecto a
+// la hora real de Chile (dato confirmado, no un bug de acá) — esto
+// ajusta SOLO lo que se muestra en pantalla. Los cálculos internos
+// (ventanas, jornada, lo que se manda al confirmar/reprogramar) siguen
+// usando la hora cruda tal cual llega del backend, sin tocar — si se
+// ajustara ahí también, esas cuentas quedarían mal contra la jornada
+// configurada (que usa esa misma hora cruda como referencia).
+function horaVista(hhmm) {
+  if (!hhmm) return hhmm;
+  const [h, m] = hhmm.split(":").map(Number);
+  const total = (((h * 60 + m - 180) % 1440) + 1440) % 1440;
+  const hh = Math.floor(total / 60);
+  const mm = total % 60;
+  return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+}
+
+// Qué OT cambiaron entre dos versiones de la propuesta (la corrida del
+// optimizador sin editar, o el plan que ya estaba confirmado si se
+// reabrió con "Editar", contra el estado actual) — se usa tanto para la
+// marca visual "Editada" como para saber, al confirmar, qué OT puntuales
+// hay que mandar por PATCH (ver onConfirmar) y a cuáles les falta su
+// motivo de reprogramación.
+//
+// No alcanza con comparar el índice crudo: si se saca la 1ª parada de
+// una ruta de 5, las otras 4 "corren" un lugar sin que nadie las haya
+// tocado — compararlas por índice las marcaría como cambiadas sin
+// serlo. Por técnico, se compara el orden relativo SOLO entre las OT que
+// siguen ahí en ambas versiones, usando la subsecuencia más larga que SÍ
+// mantiene el orden original entre sí (LIS) — todo lo que quede fuera de
+// esa subsecuencia es lo mínimo que realmente se reordenó.
+function calcularOtIdsCambiados(propuesta, propuestaOriginal) {
+  const original = propuestaOriginal || propuesta;
+  const tecnicoDe = (p) => {
+    const map = {};
+    Object.entries(p.porTecnico).forEach(([tid, { paradas }]) => paradas.forEach(ot => { map[ot.id] = tid; }));
+    (p.pendientes || []).forEach(ot => { map[ot.id] = "pendientes"; });
+    return map;
+  };
+  const tecOriginal = tecnicoDe(original);
+  const tecActual = tecnicoDe(propuesta);
+  const cambiados = new Set();
+
+  // Cambio de técnico (incluye ida/vuelta de pendientes).
+  const todosLosIds = new Set([...Object.keys(tecOriginal), ...Object.keys(tecActual)]);
+  todosLosIds.forEach(id => { if (tecOriginal[id] !== tecActual[id]) cambiados.add(id); });
+
+  const indicesEnOrden = (seq) => {
+    const n = seq.length;
+    const largo = new Array(n).fill(1);
+    const previo = new Array(n).fill(-1);
+    let mejorFinal = 0;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < i; j++) {
+        if (seq[j] < seq[i] && largo[j] + 1 > largo[i]) { largo[i] = largo[j] + 1; previo[i] = j; }
+      }
+      if (largo[i] > largo[mejorFinal]) mejorFinal = i;
+    }
+    const enOrden = new Set();
+    for (let k = mejorFinal; k !== -1; k = previo[k]) enOrden.add(k);
+    return enOrden;
+  };
+
+  Object.keys(propuesta.porTecnico).forEach(tid => {
+    const idsOriginal = (original.porTecnico[tid]?.paradas || []).map(p => p.id).filter(id => tecActual[id] === tid);
+    const idsActual = (propuesta.porTecnico[tid]?.paradas || []).map(p => p.id).filter(id => tecOriginal[id] === tid);
+    if (idsOriginal.join(",") === idsActual.join(",")) return;
+    const indiceOriginal = Object.fromEntries(idsOriginal.map((id, i) => [id, i]));
+    const enOrden = indicesEnOrden(idsActual.map(id => indiceOriginal[id]));
+    idsActual.forEach((id, i) => { if (!enOrden.has(i)) cambiados.add(id); });
+  });
+
+  return cambiados;
+}
+
+// Busca una OT por id en toda la propuesta (en la ruta de cualquier
+// técnico, o en pendientes) — para mostrar su dirección/cliente en el
+// popup de motivo de reprogramación.
+function buscarOtEnPropuesta(propuesta, otId) {
+  if (!propuesta || !otId) return null;
+  for (const { paradas } of Object.values(propuesta.porTecnico)) {
+    const encontrada = paradas.find(p => p.id === otId);
+    if (encontrada) return encontrada;
+  }
+  return (propuesta.pendientes || []).find(p => p.id === otId) || null;
+}
+
+// Vocabulario cerrado del motivo de reprogramación (HU-18) — se pide al
+// volver a confirmar un plan que ya estaba confirmado (ver esReedicion
+// en RutasExternoScreen). "Otro" habilita un texto libre al lado.
+const MOTIVOS_REPROGRAMACION = [
+  "Cliente No Disponible", "Falta de Coordinación", "Técnico No Disponible",
+  "Falta de Tiempo", "Problema de Ruta", "Problema Técnico",
+  "Dirección Incorrecta", "Cliente Solicitó Cambio", "Otro",
+];
+
+// Popup obligatorio: aparece apenas se mueve/reordena/saca una OT de un
+// plan YA confirmado (reprogramación) y el cambio no dio error — cada OT
+// tocada necesita su propio motivo, no uno solo para todo el plan. Sin
+// botón de cancelar: el cambio ya se aplicó en pantalla, lo único que
+// falta es documentar por qué.
+function MotivoReprogramacionModal({ ot, onGuardar }) {
+  const [motivo, setMotivo] = useState("");
+  const [otro, setOtro] = useState("");
+  const puedeGuardar = motivo && (motivo !== "Otro" || otro.trim());
+  return (
+    <div className="overlay">
+      <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">Motivo de reprogramación</div>
+            <div className="modal-sub">{ot ? `${ot.id} · ${ot.cliente || ""}${ot.direccion ? " — " + ot.direccion : ""}` : ""}</div>
+          </div>
+        </div>
+        <div className="modal-body">
+          <div className="field">
+            <div className="field-label">Motivo</div>
+            <select className="field-input" value={motivo} onChange={e => setMotivo(e.target.value)} autoFocus>
+              <option value="">Selecciona un motivo…</option>
+              {MOTIVOS_REPROGRAMACION.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          {motivo === "Otro" && (
+            <div className="field" style={{ marginTop: 12 }}>
+              <div className="field-label">Especifica el motivo</div>
+              <input className="field-input" value={otro} onChange={e => setOtro(e.target.value)} autoFocus />
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-primary" disabled={!puedeGuardar} onClick={() => onGuardar(motivo === "Otro" ? otro.trim() : motivo)}>
+            <Icon name="check" />Guardar motivo
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ---- Panel de selección (HU-01) ---- */
@@ -66,7 +206,6 @@ function SeleccionPanel({ fecha, onFechaChange, otsDelDia, tecnicosDisponibles, 
         <input type="date" className="field-input" style={{ width: 160, flex: "none" }} value={fecha}
           min={window.RUTAS_EXTERNO_API.hoyISO()} max={window.RUTAS_EXTERNO_API.sumarDiasISO(13)}
           onChange={e => e.target.value && onFechaChange(e.target.value)} />
-        <span className="cell-muted" style={{ fontSize: 12.5 }}>Esta fecha es la que se usa para calcular la optimización.</span>
       </div>
 
       <div className="rx-grid">
@@ -96,7 +235,7 @@ function SeleccionPanel({ fecha, onFechaChange, otsDelDia, tecnicosDisponibles, 
                     </div>
                     <div className="stop-dir"><Icon name="pin" style={{ width: 12, height: 12 }} />{ot.direccion}</div>
                   </div>
-                  <span className="badge b-slate" style={{ flex: "none" }}><Icon name="clock" />{ot.ventanaInicio}–{ot.ventanaFin}</span>
+                  <span className="badge b-slate" style={{ flex: "none" }}><Icon name="clock" />{ot.horaProgramada ? horaVista(ot.horaProgramada) : "Sin hora"}</span>
                 </label>
               ))}
             </div>
@@ -137,15 +276,15 @@ function SeleccionPanel({ fecha, onFechaChange, otsDelDia, tecnicosDisponibles, 
 
       <div className="rx-actions">
         <button className="btn btn-primary" disabled={optimizando || !puedeOptimizar} onClick={onOptimizar}>
-          <Icon name={optimizando ? "refresh" : "zap"} />{optimizando ? "Optimizando…" : "Optimizar planificación"}
+          {optimizando ? <span className="icon-spin"><Icon name="refresh" /></span> : <Icon name="zap" />}{optimizando ? "Optimizando…" : "Optimizar planificación"}
         </button>
-        <span className="cell-muted" style={{ fontSize: 12.5 }}>
-          {!OPTIMIZADOR_DISPONIBLE
-            ? "El servicio de optimización está en actualización — vuelve a estar disponible pronto."
-            : puedeOptimizar
-              ? "El cálculo lo hace el servicio real de optimización (OR-Tools), con la selección de aquí."
+        {(!OPTIMIZADOR_DISPONIBLE || !puedeOptimizar) && (
+          <span className="cell-muted" style={{ fontSize: 12.5 }}>
+            {!OPTIMIZADOR_DISPONIBLE
+              ? "El servicio de optimización está en actualización — vuelve a estar disponible pronto."
               : "Selecciona al menos una OT y un técnico."}
-        </span>
+          </span>
+        )}
       </div>
     </>
   );
@@ -175,10 +314,27 @@ function RxMoveMenu({ otros, onMove, onClose }) {
 }
 
 /* ---- Tarjeta de ruta editable por técnico (HU-03) ---- */
-function RouteEditCard({ tecnico, paradas, otrosTecnicos, onMoveUp, onMoveDown, onMover, onEliminar }) {
+function RouteEditCard({ tecnico, paradas, otrosTecnicos, recalculando, otIdsCambiados, errorTecnico, onMoveUp, onMoveDown, onMover, onEliminar }) {
   const [menuFor, setMenuFor] = useState(null);
+
+  // El mensaje se borra del estado (ver mostrarErrorTecnico) a los pocos
+  // segundos, pero acá se lo mantiene montado un ratito más para que se
+  // desvanezca con transición en vez de desaparecer de golpe.
+  const [errorMostrado, setErrorMostrado] = useState(null);
+  const [errorSaliendo, setErrorSaliendo] = useState(false);
+  useEffect(() => {
+    if (errorTecnico) {
+      setErrorMostrado(errorTecnico);
+      setErrorSaliendo(false);
+    } else if (errorMostrado) {
+      setErrorSaliendo(true);
+      const t = setTimeout(() => { setErrorMostrado(null); setErrorSaliendo(false); }, 300);
+      return () => clearTimeout(t);
+    }
+  }, [errorTecnico]);
+
   return (
-    <div className={"route-card" + (menuFor ? " menu-open" : "")}>
+    <div className={"route-card" + (menuFor ? " menu-open" : "")} data-tec-id={tecnico.id}>
       <div className="route-head">
         <Avatar name={tecnico.nombre.split(" ").map(p => p[0]).join("").slice(0, 2)} color={tecnico.color} size="lg" />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -192,11 +348,28 @@ function RouteEditCard({ tecnico, paradas, otrosTecnicos, onMoveUp, onMoveDown, 
       </div>
 
       {tecnico.resumen && (
-        <div className="row-flex" style={{ gap: 16, flexWrap: "wrap", padding: "9px 18px", borderBottom: "1px solid var(--border)", fontSize: 12, color: "var(--text-3)" }}>
-          <span><Icon name="clock" style={{ width: 12, height: 12 }} />{" "}{tecnico.resumen.horaSalidaBase}–{tecnico.resumen.horaRetornoBase}</span>
+        <div className="row-flex" style={{ gap: 16, flexWrap: "wrap", padding: "9px 18px", borderBottom: "1px solid var(--border)", fontSize: 12, color: "var(--text-3)", opacity: recalculando ? 0.55 : 1, transition: "opacity .12s" }}>
+          {/* Rango de horas PROGRAMADAS (1ª a última parada, fijas) — no
+              la estimada de llegada, que puede caer hasta 30 min antes. */}
+          {paradas.length > 0 && (paradas[0].horaProgramada || paradas[paradas.length - 1].horaProgramada) && (
+            <span><Icon name="clock" style={{ width: 12, height: 12 }} />{" "}
+              {paradas[0].horaProgramada ? horaVista(paradas[0].horaProgramada) : "—"}
+              –{paradas[paradas.length - 1].horaProgramada ? horaVista(paradas[paradas.length - 1].horaProgramada) : "—"}
+            </span>
+          )}
           <span>{tecnico.resumen.distanciaTotalKm != null ? tecnico.resumen.distanciaTotalKm.toFixed(1) + " km" : "—"}</span>
           <span>Capacidad {tecnico.resumen.capacidadUso}</span>
+          {errorMostrado && (
+            <span className={"row-flex rx-error-tecnico" + (errorSaliendo ? " saliendo" : "")} style={{ gap: 5, color: "var(--amber-fg)", fontWeight: 600 }}>
+              <Icon name="alert" style={{ width: 12, height: 12 }} />{errorMostrado}
+            </span>
+          )}
           {tecnico.resumen.esperaTotalMin > 0 && <span>{tecnico.resumen.esperaTotalMin} min de espera total</span>}
+          {recalculando && (
+            <span className="row-flex" style={{ gap: 5 }}>
+              <span className="icon-spin"><Icon name="refresh" style={{ width: 11, height: 11 }} /></span>Actualizando…
+            </span>
+          )}
         </div>
       )}
 
@@ -204,21 +377,21 @@ function RouteEditCard({ tecnico, paradas, otrosTecnicos, onMoveUp, onMoveDown, 
         <div className="card empty"><Icon name="checkC" />Sin OTs asignadas.</div>
       ) : (
         <div className="route-stops">
-          {paradas.map((ot, i) => (
-            <div key={ot.id} className="route-stop">
+          {paradas.map((ot, i) => {
+            const cambiada = otIdsCambiados && otIdsCambiados.has(ot.id);
+            return (
+            <div key={ot.id} className={"route-stop" + (cambiada ? " route-stop-cambiada" : "")}>
               <div className="stop-n">{i + 1}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="row-flex" style={{ gap: 7 }}>
                   <span className="id-pill">{ot.id}</span>
                   <span className="stop-cliente">{ot.cliente}</span>
+                  {cambiada && <Badge cls="b-amber" dot={false}>Editada</Badge>}
                 </div>
                 <div className="stop-dir"><Icon name="pin" style={{ width: 12, height: 12 }} />{ot.direccion}</div>
               </div>
-              {ot.horaEstimadaLlegada && (
-                <div className="stop-meta">
-                  Llega ~{ot.horaEstimadaLlegada}
-                  {ot.esperaMin > 0 && <><br />espera {ot.esperaMin} min</>}
-                </div>
+              {ot.horaProgramada && (
+                <span className="badge b-slate" style={{ flex: "none" }}><Icon name="clock" />{horaVista(ot.horaProgramada)}</span>
               )}
               <div className="rx-stop-actions">
                 <button className="btn btn-sm" disabled={i === 0} onClick={() => onMoveUp(tecnico.id, ot.id)} title="Subir"><Icon name="chevD" style={{ transform: "rotate(180deg)" }} /></button>
@@ -235,27 +408,27 @@ function RouteEditCard({ tecnico, paradas, otrosTecnicos, onMoveUp, onMoveDown, 
                 <button className="dev-remove" title="Quitar de la ruta" onClick={() => onEliminar(tecnico.id, ot.id)}><Icon name="x" style={{ width: 15, height: 15 }} /></button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-// El backend manda la razón como texto libre con un prefijo informal
-// ("TIEMPO: ...", "OPTIMIZACION: ..."), no como categoría estructurada
-// todavía (HU-16 promete al menos georreferencia/sectorial/temporal, pero
-// eso no está implementado del lado del servicio). Esto separa ese
-// prefijo para mostrarlo como etiqueta en vez de oración corrida — es un
-// parche visual sobre una convención no garantizada, no la clasificación
-// real. Reemplazar cuando el optimizador entregue una causa estructurada.
-function parsearRazon(texto) {
-  const m = /^([A-ZÁÉÍÓÚÑ_]+):\s*(.*)$/.exec(texto);
-  return m ? { tipo: m[1], detalle: m[2] } : { tipo: null, detalle: texto };
-}
+// Causa clasificada real, entregada por el optimizador (HU-16) en
+// causa_principal/causas[] de cada diagnóstico — ya no hace falta parsear
+// el prefijo del texto libre de "razones".
+const CAUSA_LABEL = {
+  georreferencia: "Georreferencia",
+  sectorial: "Sector",
+  temporal: "Horario",
+  capacidad: "Capacidad",
+  optimizacion: "Optimización",
+};
 
 /* ---- Fila de OT pendiente/no asignable, con botón "Mover" a un técnico ---- */
-function PendienteRow({ ot, tecnicos, onMover }) {
+function PendienteRow({ ot, tecnicos, onMover, cambiada }) {
   const [menuAbierto, setMenuAbierto] = useState(false);
   return (
     <div className="rx-check-row">
@@ -263,17 +436,16 @@ function PendienteRow({ ot, tecnicos, onMover }) {
         <div className="row-flex" style={{ gap: 7 }}>
           <span className="id-pill">{ot.id}</span>
           <span className="cell-strong">{ot.cliente}</span>
+          {ot.causaPrincipal && <Badge cls="b-amber">{CAUSA_LABEL[ot.causaPrincipal] || ot.causaPrincipal}</Badge>}
+          {cambiada && <Badge cls="b-amber" dot={false}>Editada</Badge>}
         </div>
         <div className="stop-dir"><Icon name="pin" style={{ width: 12, height: 12 }} />{ot.direccion}</div>
-        {ot.razones && ot.razones.map((texto, i) => {
-          const { tipo, detalle } = parsearRazon(texto);
-          return (
-            <div key={i} className="stop-dir" style={{ color: "var(--amber-fg)", alignItems: "flex-start" }}>
-              <Icon name="alert" style={{ width: 12, height: 12, marginTop: 2, flex: "none" }} />
-              <span>{tipo && <b style={{ fontWeight: 700 }}>{tipo}: </b>}{detalle}</span>
-            </div>
-          );
-        })}
+        {(ot.causas || []).map((c, i) => (
+          <div key={i} className="stop-dir" style={{ color: "var(--amber-fg)", alignItems: "flex-start" }}>
+            <Icon name="alert" style={{ width: 12, height: 12, marginTop: 2, flex: "none" }} />
+            <span><b style={{ fontWeight: 700 }}>{CAUSA_LABEL[c.categoria] || c.categoria}: </b>{c.detalle}</span>
+          </div>
+        ))}
       </div>
       <Badge cls="b-amber" icon="alert">Pendiente</Badge>
       <div style={{ position: "relative" }}>
@@ -309,6 +481,14 @@ function ResumenCorrida({ resumen }) {
       {resumen.distanciaTotalKm != null && (
         <span className="cell-muted" style={{ fontSize: 12.5 }}>{resumen.distanciaTotalKm.toFixed(1)} km totales</span>
       )}
+      {resumen.otsPendientes > 0 && resumen.pendientesPorCausa && (
+        <span className="cell-muted" style={{ fontSize: 12.5 }}>
+          {Object.entries(resumen.pendientesPorCausa)
+            .filter(([, n]) => n > 0)
+            .map(([causa, n]) => `${n} por ${CAUSA_LABEL[causa] || causa}`)
+            .join(" · ")}
+        </span>
+      )}
       {matrizFallback && (
         <span className="badge b-amber" style={{ marginLeft: "auto" }}>
           <Icon name="alert" />Distancias estimadas (sin ruteo real disponible)
@@ -319,8 +499,54 @@ function ResumenCorrida({ resumen }) {
 }
 
 /* ---- Panel de propuesta + edición + confirmación (HU-02/HU-03) ---- */
-function PropuestaPanel({ propuesta, resumen, error, onMoveUp, onMoveDown, onMover, onEliminar, onMoverPendiente, onVolver, onConfirmar }) {
+function PropuestaPanel({ propuesta, propuestaOriginal, resumen, error, recalculando, erroresTecnico, confirmando, onMoveUp, onMoveDown, onMover, onEliminar, onMoverPendiente, onVolver, onConfirmar, esReedicion, motivosPorOt }) {
   const tecIds = Object.keys(propuesta.porTecnico);
+  const tecIdsConTarjeta = tecIds.filter(id => propuesta.porTecnico[id].paradas.length > 0);
+
+  // Qué OT cambiaron respecto al punto de partida — solo visual acá, para
+  // que se note de un vistazo qué se movió/reordenó/sacó y qué sigue
+  // exactamente igual (ver calcularOtIdsCambiados arriba).
+  const otIdsCambiados = useMemo(() => calcularOtIdsCambiados(propuesta, propuestaOriginal), [propuesta, propuestaOriginal]);
+  // Cuántas de las OT que cambiaron todavía no tienen su motivo de
+  // reprogramación guardado (se pide con un popup apenas se edita cada
+  // una — esto es solo para avisar si quedó alguna sin responder).
+  const otsFaltanMotivo = esReedicion
+    ? Array.from(otIdsCambiados).filter(id => !(motivosPorOt && motivosPorOt[id])).length
+    : 0;
+  const tecIdsSinTarjeta = tecIds.filter(id => propuesta.porTecnico[id].paradas.length === 0);
+
+  // .routes-grid es un layout de 2 columnas en "masonry" (column-count:2,
+  // ver styles.css) — la tarjeta de cada técnico cae en la columna que
+  // esté más corta en ese momento, así que el orden del DOM no coincide
+  // con el orden visual en pantalla (se ve, de arriba hacia abajo y de
+  // izquierda a derecha, intercalado entre ambas columnas). Para que el
+  // menú "Mover" liste a los técnicos en ESE orden visual (lo que pidió
+  // la coordinadora: que coincida con lo que ve en pantalla, no con el
+  // orden interno), se mide la posición real de cada tarjeta ya
+  // renderizada y se ordena por (arriba, izquierda).
+  const gridRef = useRef(null);
+  const [ordenVisual, setOrdenVisual] = useState(null);
+  const tecIdsConTarjetaKey = tecIdsConTarjeta.join(",");
+  useLayoutEffect(() => {
+    const medir = () => {
+      if (!gridRef.current) return;
+      const tarjetas = Array.from(gridRef.current.querySelectorAll("[data-tec-id]"));
+      if (!tarjetas.length) { setOrdenVisual(null); return; }
+      const posiciones = tarjetas.map(el => {
+        const r = el.getBoundingClientRect();
+        return { id: el.getAttribute("data-tec-id"), top: r.top, left: r.left };
+      });
+      posiciones.sort((a, b) => a.top - b.top || a.left - b.left);
+      setOrdenVisual(posiciones.map(p => p.id));
+    };
+    medir();
+    window.addEventListener("resize", medir);
+    return () => window.removeEventListener("resize", medir);
+  }, [tecIdsConTarjetaKey]);
+
+  // Los que no tienen tarjeta visible (sin OTs todavía) van al final, ya
+  // que no tienen una posición en pantalla con la cual coincidir.
+  const ordenParaMover = [...(ordenVisual || tecIdsConTarjeta), ...tecIdsSinTarjeta];
   return (
     <>
       <ResumenCorrida resumen={resumen} />
@@ -335,7 +561,7 @@ function PropuestaPanel({ propuesta, resumen, error, onMoveUp, onMoveDown, onMov
       {tecIds.every(tid => propuesta.porTecnico[tid].paradas.length === 0) ? (
         <div className="card empty"><Icon name="checkC" />Ningún técnico tiene OTs asignadas todavía.</div>
       ) : (
-        <div className="routes-grid">
+        <div className="routes-grid" ref={gridRef}>
           {tecIds
             .filter(tid => propuesta.porTecnico[tid].paradas.length > 0)
             .map(tid => {
@@ -343,10 +569,13 @@ function PropuestaPanel({ propuesta, resumen, error, onMoveUp, onMoveDown, onMov
             // Para "Mover" se ofrecen TODOS los técnicos de la propuesta (no
             // solo los que ya tienen tarjeta visible) — así una OT sí se
             // puede mandar a un técnico que hoy está vacío y por eso no
-            // muestra tarjeta.
-            const otros = tecIds.filter(id => id !== tid).map(id => propuesta.porTecnico[id].tecnico);
+            // muestra tarjeta. El orden sigue a ordenParaMover (mismo orden
+            // que las tarjetas en pantalla).
+            const otros = ordenParaMover.filter(id => id !== tid).map(id => propuesta.porTecnico[id].tecnico);
             return (
               <RouteEditCard key={tid} tecnico={tecnico} paradas={paradas} otrosTecnicos={otros}
+                recalculando={!!(recalculando && recalculando[tid])} otIdsCambiados={otIdsCambiados}
+                errorTecnico={erroresTecnico && erroresTecnico[tid]}
                 onMoveUp={onMoveUp} onMoveDown={onMoveDown} onMover={onMover} onEliminar={onEliminar} />
             );
           })}
@@ -364,16 +593,24 @@ function PropuestaPanel({ propuesta, resumen, error, onMoveUp, onMoveDown, onMov
           <div className="rx-check-list">
             {propuesta.pendientes.map(ot => (
               <PendienteRow key={ot.id} ot={ot}
-                tecnicos={tecIds.map(id => propuesta.porTecnico[id].tecnico)}
-                onMover={onMoverPendiente} />
+                tecnicos={ordenParaMover.map(id => propuesta.porTecnico[id].tecnico)}
+                onMover={onMoverPendiente} cambiada={otIdsCambiados.has(ot.id)} />
             ))}
           </div>
         )}
       </div>
 
       <div className="rx-actions">
-        <button className="btn" onClick={onVolver}><Icon name="arrowL" />Volver a selección</button>
-        <button className="btn btn-primary" onClick={onConfirmar}><Icon name="check" />Confirmar plan</button>
+        <button className="btn" onClick={onVolver} disabled={confirmando}><Icon name="arrowL" />Volver a selección</button>
+        {esReedicion && otsFaltanMotivo > 0 && (
+          <span className="cell-muted" style={{ fontSize: 12.5, marginLeft: "auto", color: "var(--amber-fg)" }}>
+            <Icon name="alert" style={{ width: 13, height: 13 }} />{" "}
+            Falta el motivo de {otsFaltanMotivo} OT — se pide apenas se edita cada una.
+          </span>
+        )}
+        <button className="btn btn-primary" onClick={onConfirmar} disabled={confirmando || (esReedicion && otsFaltanMotivo > 0)} style={esReedicion && otsFaltanMotivo === 0 ? { marginLeft: "auto" } : undefined}>
+          {confirmando ? <span className="icon-spin"><Icon name="refresh" /></span> : <Icon name="check" />}{confirmando ? "Asignando…" : "Asignar"}
+        </button>
       </div>
     </>
   );
@@ -406,17 +643,101 @@ function ConfirmadoBanner({ confirmado, onEditar }) {
   );
 }
 
+// Dibuja el trazado real de una ruta sobre un mapa de OpenStreetMap.
+// Leaflet no es un componente de React — se monta a mano sobre un div y
+// se destruye al desmontar, como pide su propia API. Por eso este
+// componente se desmonta del todo al cerrar el mapa (no se oculta con
+// CSS): reabrirlo vuelve a crear el mapa de cero, que es exactamente lo
+// que Leaflet espera — ocultar y reaparecer el mismo contenedor con
+// display:none es el bug clásico que lo deja en blanco.
+function MapaRuta({ base, paradas, geometria }) {
+  const divRef = useRef(null);
+
+  useEffect(() => {
+    if (!divRef.current || !window.L) return;
+    const map = window.L.map(divRef.current, { scrollWheelZoom: false });
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap",
+      maxZoom: 19,
+    }).addTo(map);
+
+    // El punto de inicio del trayecto es la base (si la ruta parte de ahí)
+    // o, si no hay base, la primera parada — así se arma `puntos` en
+    // verEnMapa(). El de llegada es siempre la última parada. Se pintan
+    // distinto (verde/rojo) para que el sentido del recorrido se note de
+    // un vistazo, sin tener que leer los números uno por uno.
+    const bounds = [];
+    if (base) {
+      window.L.marker([base.lat, base.lng], {
+        icon: window.L.divIcon({ className: "map-pin map-pin-base map-pin-start", html: "B", iconSize: [22, 22] }),
+      }).addTo(map).bindTooltip("Inicio — Base del técnico");
+      bounds.push([base.lat, base.lng]);
+    }
+    paradas.forEach((p, i) => {
+      const esInicio = !base && i === 0;
+      const esFinal = i === paradas.length - 1;
+      const clase = esFinal ? "map-pin map-pin-end" : esInicio ? "map-pin map-pin-start" : "map-pin";
+      const tooltip = esFinal
+        ? `Destino final — ${p.direccion || p.id}`
+        : esInicio
+        ? `Inicio — ${p.direccion || p.id}`
+        : p.direccion || p.id;
+      window.L.marker([p.lat, p.lng], {
+        icon: window.L.divIcon({ className: clase, html: String(i + 1), iconSize: [22, 22] }),
+      }).addTo(map).bindTooltip(tooltip);
+      bounds.push([p.lat, p.lng]);
+    });
+
+    const trazado = (geometria && geometria.coordenadas) || [];
+    if (trazado.length > 1) {
+      window.L.polyline(trazado, { color: "#033E84", weight: 4, opacity: 0.85 }).addTo(map);
+      bounds.push(...trazado);
+    }
+
+    if (bounds.length) map.fitBounds(bounds, { padding: [24, 24] });
+
+    return () => map.remove();
+  }, []);
+
+  return <div ref={divRef} className="ruta-mapa" />;
+}
+
 // Fila de una ruta ya registrada en el backend (HU-18, "consultar sin
-// salir del asignador"). Solo lectura — no hay acciones acá, es historial.
-// El shape exacto de GET /api/rutas?fecha= no está documentado (no hay
-// ejemplo de respuesta poblada, solo "[]" porque nada se escribió
-// todavía) — se lee defensivamente con nombres alternativos y por eso no
-// reusa RouteEditCard tal cual; cuando haya un registro real, puede que
-// esto necesite un ajuste rápido de nombres de campo.
+// salir del asignador"). Solo lectura, salvo el mapa — no hay acciones de
+// edición acá, es historial. El trazado se pide bajo demanda (botón "Ver
+// en mapa"): no tiene sentido llamar a /ruteo/geometria para las 7+ rutas
+// del día si la planificadora solo quiere mirar una.
 function RegistroRutaCard({ ruta }) {
-  const paradas = ruta.paradas || ruta.ordenes_asignadas || [];
+  const paradas = (ruta.paradas || ruta.ordenes_asignadas || []).map((p, i) => ({
+    id: p.ot_id || p.id || `parada-${i}`,
+    direccion: p.direccion,
+    lat: p.latitud ?? p.lat,
+    lng: p.longitud ?? p.lng,
+    // Hora PROGRAMADA real de la OT (fija) — no la estimada de llegada,
+    // que puede caer hasta 30 min antes y confunde.
+    horaProgramada: p.hora_programada || p.horaProgramada || null,
+  }));
   const nombre = ruta.nombre || ruta.tecnico_nombre || ruta.tecnico_id || "Técnico";
   const zona = ruta.zona_base || ruta.zona || null;
+  const base = (ruta.base_latitud != null && ruta.base_longitud != null)
+    ? { lat: ruta.base_latitud, lng: ruta.base_longitud } : null;
+
+  const [mapa, setMapa] = useState({ abierto: false, estado: "inicial", geometria: null, error: null });
+
+  const verEnMapa = async () => {
+    if (mapa.abierto) { setMapa(m => ({ ...m, abierto: false })); return; }
+    if (mapa.estado === "ok") { setMapa(m => ({ ...m, abierto: true })); return; }
+    setMapa(m => ({ ...m, abierto: true, estado: "cargando", error: null }));
+    try {
+      const puntos = [...(base ? [base] : []), ...paradas.filter(p => p.lat != null && p.lng != null)];
+      if (puntos.length < 2) throw new Error("No hay suficientes puntos con coordenadas para trazar la ruta.");
+      const geometria = await window.RUTAS_EXTERNO_API.obtenerGeometriaRuta(puntos);
+      setMapa({ abierto: true, estado: "ok", geometria, error: null });
+    } catch (err) {
+      setMapa(m => ({ ...m, estado: "error", error: err.message }));
+    }
+  };
+
   return (
     <div className="card" style={{ marginBottom: 10 }}>
       <div className="route-head" style={{ padding: "12px 16px" }}>
@@ -424,13 +745,45 @@ function RegistroRutaCard({ ruta }) {
           <div className="cell-strong">{nombre}</div>
           {zona && <div className="route-zone"><Icon name="pin" style={{ width: 12, height: 12 }} />{zona}</div>}
         </div>
+        {paradas.length > 0 && (
+          <button type="button" className="btn btn-sm" onClick={verEnMapa}>
+            <Icon name="pin" style={{ width: 14, height: 14 }} />{mapa.abierto ? "Ocultar mapa" : "Ver en mapa"}
+          </button>
+        )}
+        {paradas.length > 0 && (paradas[0].horaProgramada || paradas[paradas.length - 1].horaProgramada) && (
+          <span className="cell-muted" style={{ fontSize: 12.5, flex: "none" }}>
+            <Icon name="clock" style={{ width: 12, height: 12 }} />{" "}
+            {paradas[0].horaProgramada ? horaVista(paradas[0].horaProgramada) : "—"}
+            –{paradas[paradas.length - 1].horaProgramada ? horaVista(paradas[paradas.length - 1].horaProgramada) : "—"}
+          </span>
+        )}
+        {ruta.distancia_total_km != null && (
+          <span className="cell-muted" style={{ fontSize: 12.5, flex: "none" }}>{ruta.distancia_total_km.toFixed(1)} km</span>
+        )}
         <div className="route-count"><b>{paradas.length}</b> OT</div>
       </div>
       {paradas.length > 0 && (
         <div style={{ padding: "10px 16px 14px", display: "flex", flexWrap: "wrap", gap: 7 }}>
           {paradas.map((p, i) => (
-            <span key={p.ot_id || p.id || i} className="badge b-slate">{p.ot_id || p.id || p}</span>
+            <span key={p.id || i} className="badge b-slate">
+              {p.id}{p.horaProgramada ? ` · ${horaVista(p.horaProgramada)}` : ""}
+            </span>
           ))}
+        </div>
+      )}
+      {mapa.abierto && (
+        <div style={{ padding: "0 16px 16px" }}>
+          {mapa.estado === "cargando" && (
+            <div className="cell-muted" style={{ fontSize: 12.5, padding: "14px 0", display: "flex", alignItems: "center", gap: 7 }}>
+              <span className="icon-spin"><Icon name="refresh" style={{ width: 14, height: 14 }} /></span>Trazando la ruta…
+            </div>
+          )}
+          {mapa.estado === "error" && (
+            <div className="cell-muted" style={{ fontSize: 12.5, color: "var(--red-fg)", padding: "14px 0", display: "flex", alignItems: "center", gap: 7 }}>
+              <Icon name="alert" style={{ width: 14, height: 14 }} />No se pudo trazar la ruta: {mapa.error}
+            </div>
+          )}
+          {mapa.estado === "ok" && <MapaRuta base={base} paradas={paradas} geometria={mapa.geometria} />}
         </div>
       )}
     </div>
@@ -465,6 +818,7 @@ function RegistroAsignaciones({ fechaInicial }) {
   // la planificadora, así que no se muestra (mismo criterio que ya usa
   // PropuestaPanel con las tarjetas de ruta en la etapa de propuesta).
   const rutasConParadas = rutas.filter(r => (r.paradas || r.ordenes_asignadas || []).length > 0);
+  const kmTotal = rutasConParadas.reduce((sum, r) => sum + (r.distancia_total_km || 0), 0);
 
   return (
     <div className="card card-pad" style={{ marginBottom: 16 }}>
@@ -477,6 +831,11 @@ function RegistroAsignaciones({ fechaInicial }) {
           <span className={estado === "cargando" ? "icon-spin" : ""}><Icon name="refresh" /></span>
           {estado === "cargando" ? "Consultando…" : "Consultar"}
         </button>
+        {estado === "ok" && rutasConParadas.length > 0 && (
+          <span className="cell-muted" style={{ fontSize: 12.5, marginLeft: "auto" }}>
+            <b style={{ color: "var(--text)" }}>{rutasConParadas.length}</b> ruta(s) · <b style={{ color: "var(--text)" }}>{kmTotal.toFixed(1)}</b> km en total
+          </span>
+        )}
       </div>
 
       {estado === "error" && (
@@ -496,8 +855,25 @@ function RegistroAsignaciones({ fechaInicial }) {
   );
 }
 
+/* ---- Pantalla propia para consultar asignaciones registradas (antes
+   vivía inline arriba de "Asignar rutas"; ahora es una pantalla aparte,
+   a la que se entra con el botón "Consultar asignaciones registradas") ---- */
+function RegistroAsignacionesScreen({ go }) {
+  return (
+    <div className="page fade-in">
+      <a className="back-link" onClick={() => go("rutasExterno")}><Icon name="arrowL" />Asignar rutas</a>
+      <div className="page-head">
+        <div>
+          <div className="page-title">Asignaciones registradas</div>
+        </div>
+      </div>
+      <RegistroAsignaciones fechaInicial={window.RUTAS_EXTERNO_API.hoyISO()} />
+    </div>
+  );
+}
+
 /* ---- Pantalla raíz: orquesta selección → propuesta → confirmación ---- */
-function RutasExternoScreen({ onToast }) {
+function RutasExternoScreen({ onToast, go }) {
   // Día que se está planificando — no tiene que ser forzosamente "hoy"
   // (el selector permite hasta 13 días hacia adelante). Se persiste para
   // no perderlo si solo cambiaste de pantalla.
@@ -521,15 +897,54 @@ function RutasExternoScreen({ onToast }) {
   // sí persisten, así no se pierde el trabajo si solo cambiaste de pantalla.
   const [etapa, setEtapa] = useState("seleccion");
   const [propuesta, setPropuesta] = useState(() => rxLoad(RX_KEYS.propuesta, null));
+  // Snapshot de la propuesta SIN editar (recién salida del optimizador, o
+  // recién reabierta desde un plan confirmado) + cuándo se generó — para
+  // poder armar ruta_propuesta/modificaciones al confirmar (HU-18: el
+  // backend de persistencia quiere saber qué cambió a mano, no solo el
+  // resultado final). Ver onOptimizar/onEditarConfirmado/onConfirmar.
+  const [propuestaOriginal, setPropuestaOriginal] = useState(() => rxLoad(RX_KEYS.propuestaOriginal, null));
+  const [generadoEn, setGeneradoEn] = useState(() => rxLoad(RX_KEYS.generadoEn, null));
   // Resumen de la última corrida (para el estado de éxito explícito) — no
   // se persiste: es contexto de la corrida recién hecha, no parte del plan.
   const [resumen, setResumen] = useState(null);
+  const [confirmando, setConfirmando] = useState(false);
+  // Reprogramación: solo aplica al reeditar un plan YA confirmado (no la
+  // primera vez que se arma uno — ahí no se está reprogramando nada
+  // todavía). El motivo es POR OT, no uno solo para todo el plan: cada
+  // vez que se mueve/reordena/saca una OT sin que dé error, se pide su
+  // propio motivo con un popup (ver aplicarYRecalcular/onGuardarMotivoOt)
+  // y se manda individualmente por PATCH al confirmar (onConfirmar) — no
+  // se reenvía el plan completo, para no duplicar lo que no cambió.
+  const [esReedicion, setEsReedicion] = useState(false);
+  const [motivosPorOt, setMotivosPorOt] = useState({});
+  // OT esperando su popup de motivo ahora mismo: { id, tecnicoId, ot }
+  const [otPidiendoMotivo, setOtPidiendoMotivo] = useState(null);
   // Mapa fecha (ISO) -> plan confirmado de ese día. Cada día se confirma y
   // se edita por separado; todos los planes confirmados se muestran a la vez,
   // sin importar qué día esté elegido en el selector de planificación.
   const [confirmados, setConfirmados] = useState(() => rxLoad(RX_KEYS.confirmados, {}));
   const [error, setError] = useState(null);
   const [optimizando, setOptimizando] = useState(false);
+
+  // Configuración de negocio real (HU-16: jornada, duración de servicio
+  // por tipo de OT, capacidad por tipo de técnico) — se usa para
+  // recalcular hora/km/capacidad con datos reales al editar la propuesta
+  // a mano (ver recalcularTecnico más abajo). No bloquea la pantalla si
+  // todavía no cargó: mientras tanto, mover/reordenar sigue funcionando,
+  // solo no se recalcula el resumen hasta que esté disponible.
+  const [configNegocio, setConfigNegocio] = useState(null);
+  useEffect(() => {
+    window.RUTAS_EXTERNO_API.obtenerConfiguracion().then(setConfigNegocio).catch(() => {});
+  }, []);
+  // Técnicos cuyo resumen se está recalculando ahora mismo (para mostrar
+  // un indicador breve en su tarjeta en vez de que el número cambie de
+  // golpe sin aviso).
+  const [recalculando, setRecalculando] = useState({});
+  // Error de restricción (capacidad/jornada/ventana) por técnico — se
+  // muestra DENTRO de la tarjeta afectada, junto a hora/km/capacidad, en
+  // vez de un aviso genérico arriba de la pantalla (así se ve de
+  // inmediato cuál ruta rechazó el cambio y por qué OT).
+  const [erroresTecnico, setErroresTecnico] = useState({});
 
   // Las OT que ya quedaron en algún plan confirmado (de cualquier día) no se
   // vuelven a ofrecer como elegibles (el backend todavía no sabe de esta
@@ -596,6 +1011,8 @@ function RutasExternoScreen({ onToast }) {
   useEffect(() => rxSave(RX_KEYS.otsSel, otsSel), [otsSel]);
   useEffect(() => rxSave(RX_KEYS.tecSel, tecSel), [tecSel]);
   useEffect(() => rxSave(RX_KEYS.propuesta, propuesta), [propuesta]);
+  useEffect(() => rxSave(RX_KEYS.propuestaOriginal, propuestaOriginal), [propuestaOriginal]);
+  useEffect(() => rxSave(RX_KEYS.generadoEn, generadoEn), [generadoEn]);
   useEffect(() => rxSave(RX_KEYS.confirmados, confirmados), [confirmados]);
 
   const toggleOt = id => setOtsSel(prev => ({ ...prev, [id]: !prev[id] }));
@@ -612,8 +1029,17 @@ function RutasExternoScreen({ onToast }) {
     if (!c) return;
     setFecha(fechaConfirmado);
     setPropuesta({ porTecnico: deepClone(c.porTecnico), pendientes: [] });
+    // Punto de partida para esta sesión de edición: lo que ya estaba
+    // confirmado. Si se mueve algo de acá en más y se vuelve a confirmar,
+    // eso cuenta como modificación nueva (no se compara contra la corrida
+    // original del optimizador, que ya no es lo relevante acá).
+    setPropuestaOriginal({ porTecnico: deepClone(c.porTecnico), pendientes: [] });
+    setGeneradoEn(c.generadoEn || new Date().toISOString());
     setResumen(null); // no es una corrida nueva, no hay resumen que mostrar
     setError(null);
+    setEsReedicion(true); // reabrir un plan confirmado = reprogramación, pide motivo al editar cada OT
+    setMotivosPorOt({});
+    setOtPidiendoMotivo(null);
     setEtapa("propuesta");
   };
 
@@ -678,6 +1104,10 @@ function RutasExternoScreen({ onToast }) {
             lng: p.longitud,
             ventanaInicio: p.hora_programada ? sumarMinutos(p.hora_programada, -30) : "08:00",
             ventanaFin: p.hora_programada ? sumarMinutos(p.hora_programada, 30) : "18:00",
+            // Hora programada real de la OT (fija) — distinta de la
+            // estimada de llegada, que puede caer hasta 30 min antes
+            // (ventana de tolerancia) y confunde si se muestra sola.
+            horaProgramada: p.hora_programada || null,
             // Hora estimada de llegada/espera — ya viene calculada con
             // ruteo real; se muestra en cada parada de la tarjeta de ruta.
             horaEstimadaLlegada: p.hora_estimada_llegada,
@@ -688,12 +1118,17 @@ function RutasExternoScreen({ onToast }) {
 
       // Pendientes: el diagnóstico del backend da la razón pero no el
       // cliente/dirección (eso ya lo tenemos de la selección del panel) —
-      // se cruza por id para mostrar la fila completa.
+      // se cruza por id para mostrar la fila completa. lat/lng SÍ vienen
+      // del diagnóstico (y no de la selección, que no las trae) — hacen
+      // falta si la coordinadora mueve esta OT a la ruta de un técnico,
+      // para poder recalcular esa ruta con datos reales (ver
+      // recalcularTecnico/onMoverPendiente).
       const otsSeleccionadasPorId = Object.fromEntries(otsSeleccionadas.map(o => [o.id, o]));
       const pendientes = (resultado.diagnosticos || []).map(d => {
+        const causa = { causaPrincipal: d.causa_principal, causas: d.causas || [], precisionUbicacion: d.precision_ubicacion, lat: d.latitud, lng: d.longitud };
         const ot = otsSeleccionadasPorId[d.ot_id];
-        return ot ? { ...ot, razones: d.razones || [] } : {
-          id: d.ot_id, cliente: TIPO_OT_LABEL[d.tipo] || d.tipo, direccion: d.sector || "—", razones: d.razones || [],
+        return ot ? { ...ot, ...causa } : {
+          id: d.ot_id, cliente: TIPO_OT_LABEL[d.tipo] || d.tipo, direccion: d.sector || "—", ...causa,
         };
       });
 
@@ -702,8 +1137,17 @@ function RutasExternoScreen({ onToast }) {
         totalOts: r.total_ots, otsAsignadas: r.ots_asignadas, otsPendientes: r.ots_pendientes,
         totalTecnicos: r.total_tecnicos, tecnicosUtilizados: r.tecnicos_utilizados,
         distanciaTotalKm: r.distancia_total_km, fuenteMatriz: r.fuente_matriz,
+        pendientesPorCausa: r.pendientes_por_causa || null,
       });
       setPropuesta({ porTecnico, pendientes });
+      // Snapshot SIN editar, para poder armar ruta_propuesta/modificaciones
+      // al confirmar (ver aplicarYRecalcular arriba ya editó `propuesta`
+      // en cuanto la coordinadora mueva algo — esto queda fijo).
+      setPropuestaOriginal({ porTecnico: deepClone(porTecnico), pendientes: deepClone(pendientes) });
+      setGeneradoEn(new Date().toISOString());
+      setEsReedicion(false); // primera corrida: todavía no se está reprogramando nada
+      setMotivosPorOt({});
+      setOtPidiendoMotivo(null);
       setEtapa("propuesta");
     } catch (err) {
       setError(`No se pudo optimizar: ${err.message}`);
@@ -712,60 +1156,366 @@ function RutasExternoScreen({ onToast }) {
     }
   };
 
-  const updatePropuesta = fn => setPropuesta(prev => fn(deepClone(prev)));
+  // Muestra el aviso de un técnico y lo borra solo a los pocos segundos
+  // (no se queda pegado en la tarjeta para siempre). Si para cuando se
+  // cumple el plazo ya hay OTRO aviso más nuevo en ese mismo técnico, no
+  // lo borra — sería borrar un aviso que no es el que programó este timer.
+  const mostrarAvisoTecnico = (tid, mensaje) => {
+    setErroresTecnico(e => ({ ...e, [tid]: mensaje }));
+    setTimeout(() => {
+      setErroresTecnico(e => {
+        if (e[tid] !== mensaje) return e;
+        const n = { ...e };
+        delete n[tid];
+        return n;
+      });
+    }, 4000);
+  };
 
-  const onMoveUp = (tecnicoId, otId) => updatePropuesta(p => {
+  // Al reeditar un plan ya confirmado, cada OT que se edita necesita su
+  // propio motivo de reprogramación — se pide con un popup apenas
+  // termina esa edición.
+  const pedirMotivoSiCorresponde = (otId) => {
+    if (esReedicion) setOtPidiendoMotivo(otId);
+  };
+
+  // Capacidad máxima del técnico según su tipo (HU-16, config real).
+  const capacidadMaxDe = (tecnico) => {
+    if (!configNegocio) return Infinity; // config no cargó todavía: no avisar a ciegas
+    return tecnico.tipo === "interno" ? configNegocio.capacidad_max_interno : configNegocio.capacidad_max_externo;
+  };
+
+  // Aplica una edición manual (mover/reordenar/quitar) y chequea las
+  // restricciones "obvias" de capacidad y horario del técnico — pero NO
+  // bloquea ni revierte: la coordinadora puede tener motivos válidos para
+  // una ruta "no óptima" (ej. un cliente que solo puede en cierto
+  // horario), así que el cambio queda igual y solo se avisa que puede no
+  // ser lo más eficiente. El aviso se guarda por técnico (erroresTecnico)
+  // y se muestra DENTRO de esa tarjeta, para que quede claro de
+  // inmediato a qué ruta y OT corresponde.
+  const aplicarYRecalcular = async (fn, tecnicoIds, otId) => {
+    const prev = propuesta;
+    const next = fn(deepClone(prev));
+    setErroresTecnico(e => { const n = { ...e }; tecnicoIds.forEach(id => { delete n[id]; }); return n; });
+
+    for (const tid of tecnicoIds) {
+      const entry = next.porTecnico[tid];
+      if (entry && entry.paradas.length > capacidadMaxDe(entry.tecnico)) {
+        mostrarAvisoTecnico(tid, `Atención (${otId}) · sobre la capacidad máxima (${capacidadMaxDe(entry.tecnico)} OT)`);
+      }
+    }
+
+    setPropuesta(next);
+    if (!configNegocio) { pedirMotivoSiCorresponde(otId); return; } // sin configuración no se puede chequear jornada/ventana; la edición queda aplicada igual
+
+    setRecalculando(p => { const n = { ...p }; tecnicoIds.forEach(id => { n[id] = true; }); return n; });
+    try {
+      const resultados = await Promise.all(tecnicoIds.map(async tid => {
+        const entry = next.porTecnico[tid];
+        if (!entry) return null;
+        const { tecnico, paradas } = entry;
+        if (tecnico.lat == null || tecnico.lng == null) return null; // sin base conocida, no se puede trazar
+        // Una OT sin georreferenciar (causa "georreferencia") trae lat/lng
+        // en null — si se movió una de esas acá, no hay con qué trazar.
+        if (paradas.some(p => p.lat == null || p.lng == null)) return null;
+        const r = await window.RUTAS_EXTERNO_OPTIMIZER.recalcularResumenRuta(tecnico, paradas, configNegocio, window.RUTAS_EXTERNO_API.obtenerGeometriaRuta);
+        return { tid, ...r };
+      }));
+
+      // Se aplica el recálculo SIEMPRE (nunca se revierte) — solo si
+      // quedó alguna restricción fuera de rango, se avisa cuál y por qué.
+      setPropuesta(actual => {
+        if (!actual) return actual;
+        const out = deepClone(actual);
+        resultados.forEach(r => {
+          if (!r || !out.porTecnico[r.tid]) return;
+          out.porTecnico[r.tid].tecnico.resumen = r.resumen;
+          out.porTecnico[r.tid].paradas = r.paradas;
+        });
+        return out;
+      });
+
+      const conViolacion = resultados.find(r => r && r.violaciones && r.violaciones.hay);
+      if (conViolacion) {
+        const v = conViolacion.violaciones;
+        const otAviso = v.otsFueraDeVentana[0]?.id || otId;
+        const motivo = v.sobrecapacidad
+          ? "sobre la capacidad máxima"
+          : v.excedeJornada
+            ? "termina después del fin de jornada"
+            : `${otAviso} llega a las ${horaVista(v.otsFueraDeVentana[0].horaEstimadaLlegada)}, después de su ventana (hasta las ${horaVista(v.otsFueraDeVentana[0].ventanaFin)})`;
+        mostrarAvisoTecnico(conViolacion.tid, `Atención (${otAviso}) · ${motivo}`);
+      }
+      pedirMotivoSiCorresponde(otId);
+    } catch (err) {
+      // Si falla (red, OSRM caído), se deja la edición aplicada sin los
+      // números recalculados — no es crítico, se puede seguir editando.
+      pedirMotivoSiCorresponde(otId);
+    } finally {
+      setRecalculando(p => { const n = { ...p }; tecnicoIds.forEach(id => { delete n[id]; }); return n; });
+    }
+  };
+
+  const onMoveUp = (tecnicoId, otId) => aplicarYRecalcular(p => {
     const arr = p.porTecnico[tecnicoId].paradas;
     const i = arr.findIndex(o => o.id === otId);
     if (i > 0) [arr[i - 1], arr[i]] = [arr[i], arr[i - 1]];
     return p;
-  });
-  const onMoveDown = (tecnicoId, otId) => updatePropuesta(p => {
+  }, [tecnicoId], otId);
+  const onMoveDown = (tecnicoId, otId) => aplicarYRecalcular(p => {
     const arr = p.porTecnico[tecnicoId].paradas;
     const i = arr.findIndex(o => o.id === otId);
     if (i >= 0 && i < arr.length - 1) [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]];
     return p;
-  });
-  const onMover = (fromId, otId, toId) => updatePropuesta(p => {
+  }, [tecnicoId], otId);
+  const onMover = (fromId, otId, toId) => aplicarYRecalcular(p => {
     const fromArr = p.porTecnico[fromId].paradas;
     const idx = fromArr.findIndex(o => o.id === otId);
     const [ot] = fromArr.splice(idx, 1);
     p.porTecnico[toId].paradas.push(ot);
     return p;
-  });
-  const onEliminar = (tecnicoId, otId) => updatePropuesta(p => {
+  }, [fromId, toId], otId);
+  const onEliminar = (tecnicoId, otId) => aplicarYRecalcular(p => {
     const arr = p.porTecnico[tecnicoId].paradas;
     const idx = arr.findIndex(o => o.id === otId);
     const [ot] = arr.splice(idx, 1);
     p.pendientes.push(ot);
     return p;
-  });
-  const onMoverPendiente = (otId, toTecId) => updatePropuesta(p => {
+  }, [tecnicoId], otId);
+  const onMoverPendiente = (otId, toTecId) => aplicarYRecalcular(p => {
     const idx = p.pendientes.findIndex(o => o.id === otId);
     const [ot] = p.pendientes.splice(idx, 1);
     p.porTecnico[toTecId].paradas.push(ot);
     return p;
-  });
+  }, [toTecId], otId);
 
-  const onVolver = () => { setPropuesta(null); setResumen(null); setError(null); setEtapa("seleccion"); };
-
-  // "Confirmar plan" todavía NO escribe de vuelta en el backend (queda
-  // solo en sessionStorage, como antes). El contrato tiene un flag
-  // aplicar_cambios para persistir la asignación, pero re-ejecutar el
-  // optimizador con ese flag en true le pide resolver el problema de
-  // nuevo — puede no respetar ediciones manuales que la coordinadora ya
-  // hizo acá (mover/reordenar paradas). Falta decidir cómo conciliar eso
-  // antes de conectar la escritura real; por ahora es deliberadamente de
-  // solo lectura hacia el backend.
-  const onConfirmar = () => {
-    const r = window.RUTAS_EXTERNO_OPTIMIZER.validarConfirmacion(propuesta.porTecnico);
-    if (!r.ok) { setError(r.duplicado); return; } // integridad de datos — esto sí bloquea
-    setConfirmados(prev => ({ ...prev, [fecha]: { porTecnico: propuesta.porTecnico, fecha } }));
-    setPropuesta(null);
-    setResumen(null);
-    setError(null);
+  const onVolver = () => {
+    setPropuesta(null); setPropuestaOriginal(null); setGeneradoEn(null); setResumen(null); setError(null);
+    setEsReedicion(false); setMotivosPorOt({}); setOtPidiendoMotivo(null);
     setEtapa("seleccion");
-    onToast?.("Plan de rutas confirmado");
+  };
+
+  // Arma el JSON que espera POST /asignar-tecnicos (equipo de base de
+  // datos, HU-18, contrato verificado contra su /openapi.json). Compara
+  // la propuesta actual contra propuestaOriginal (la versión sin editar)
+  // para separar "aceptado tal cual" de lo que se movió/reordenó/sacó a
+  // mano — eso es lo que arma ruta_propuesta/ruta_final/modificaciones.
+  const construirPayloadAsignaciones = () => {
+    const u = CP_DATA.usuarios[0];
+    const original = propuestaOriginal || propuesta;
+
+    // Dónde vivía cada OT en la versión SIN editar — para poder explicar
+    // el origen de una OT que apareció en una ruta que no la tenía antes.
+    const ubicacionOriginal = {};
+    Object.values(original.porTecnico).forEach(({ tecnico, paradas }) => {
+      paradas.forEach(p => { ubicacionOriginal[p.id] = tecnico.nombre; });
+    });
+    (original.pendientes || []).forEach(p => { ubicacionOriginal[p.id] = "pendientes"; });
+
+    const rutas = Object.entries(propuesta.porTecnico)
+      .filter(([, { paradas }]) => paradas.length > 0)
+      .map(([tid, { tecnico, paradas }]) => {
+        const idsOriginal = (original.porTecnico[tid]?.paradas || []).map(p => p.id);
+        const idsFinal = paradas.map(p => p.id);
+        const mismoSet = idsOriginal.length === idsFinal.length && idsOriginal.every(id => idsFinal.includes(id));
+        const aceptadaSinModificacion = JSON.stringify(idsOriginal) === JSON.stringify(idsFinal);
+        const modificaciones = [];
+        if (!aceptadaSinModificacion) {
+          if (mismoSet) {
+            modificaciones.push({ tipo: "reordenada" });
+          } else {
+            idsFinal.filter(id => !idsOriginal.includes(id)).forEach(id => {
+              modificaciones.push({ tipo: "ot_agregada", ot_id: id, origen: ubicacionOriginal[id] || "nueva" });
+            });
+            // "ot_removida" solo cuenta cuando la OT quedó sin asignar —
+            // si se movió a otro técnico, ese movimiento ya se refleja
+            // como "ot_agregada" en la ruta destino (ver contrato).
+            idsOriginal.filter(id => !idsFinal.includes(id)).forEach(id => {
+              if (propuesta.pendientes.some(p => p.id === id)) modificaciones.push({ tipo: "ot_removida", ot_id: id });
+            });
+          }
+        }
+        const r = tecnico.resumen || {};
+        return {
+          tecnico_id: tid,
+          tecnico_nombre: tecnico.nombre,
+          zona_base: tecnico.zona || "",
+          distancia_total_km: r.distanciaTotalKm ?? 0,
+          capacidad_uso: r.capacidadUso || `${paradas.length}/?`,
+          hora_salida_base: r.horaSalidaBase || "",
+          hora_retorno_base: r.horaRetornoBase || "",
+          ruta_propuesta: idsOriginal,
+          ruta_final: idsFinal,
+          aceptada_sin_modificacion: aceptadaSinModificacion,
+          modificaciones,
+          paradas: paradas.map((p, i) => ({
+            ot_id: p.id, secuencia: i + 1, tipo: p.tipo, direccion: p.direccion,
+            hora_estimada_llegada: p.horaEstimadaLlegada || "", espera_min: p.esperaMin || 0,
+          })),
+        };
+      });
+
+    // propuesta_modificada / tipo_modificacion: a diferencia de
+    // `modificaciones` (por ruta), esto es a nivel de todo el plan — se
+    // arma comparando dónde vivía cada OT (qué técnico, en qué posición)
+    // en la versión sin editar contra dónde vive ahora. Así no se pierde
+    // el caso donde un técnico se quedó sin ninguna OT (ya no aparece en
+    // `rutas`, pero sus OTs sí se movieron a otro lado o a pendientes).
+    const mapaOriginal = {};
+    Object.entries(original.porTecnico).forEach(([tid, { paradas }]) => {
+      paradas.forEach((p, i) => { mapaOriginal[p.id] = `${tid}:${i}`; });
+    });
+    const mapaFinal = {};
+    Object.entries(propuesta.porTecnico).forEach(([tid, { paradas }]) => {
+      paradas.forEach((p, i) => { mapaFinal[p.id] = `${tid}:${i}`; });
+    });
+    const tiposModificacion = new Set();
+    Object.keys(mapaOriginal).forEach(otId => {
+      const final = mapaFinal[otId];
+      if (!final) { tiposModificacion.add("OT descartada"); return; }
+      const [tidOriginal, idxOriginal] = mapaOriginal[otId].split(":");
+      const [tidFinal, idxFinal] = final.split(":");
+      if (tidFinal !== tidOriginal) tiposModificacion.add("OT asignada a otro técnico");
+      else if (idxFinal !== idxOriginal) tiposModificacion.add("OT reordenada");
+    });
+    Object.keys(mapaFinal).forEach(otId => {
+      if (!mapaOriginal[otId]) tiposModificacion.add("OT asignada a otro técnico");
+    });
+    const propuestaModificada = tiposModificacion.size > 0;
+
+    // resumen_corrida: el de la corrida recién hecha si hay (onOptimizar);
+    // si no (se reabrió un plan ya confirmado sin volver a correr el
+    // optimizador), se arma a partir del estado actual de la propuesta.
+    const resumenCorrida = resumen ? {
+      total_ots: resumen.totalOts, ots_asignadas: resumen.otsAsignadas, ots_pendientes: resumen.otsPendientes,
+      total_tecnicos: resumen.totalTecnicos, tecnicos_utilizados: resumen.tecnicosUtilizados,
+      distancia_total_km: resumen.distanciaTotalKm, fuente_matriz: resumen.fuenteMatriz || "osrm",
+    } : {
+      total_ots: rutas.reduce((n, r) => n + r.paradas.length, 0) + propuesta.pendientes.length,
+      ots_asignadas: rutas.reduce((n, r) => n + r.paradas.length, 0),
+      ots_pendientes: propuesta.pendientes.length,
+      total_tecnicos: Object.keys(propuesta.porTecnico).length,
+      tecnicos_utilizados: rutas.length,
+      distancia_total_km: rutas.reduce((n, r) => n + (r.distancia_total_km || 0), 0),
+      fuente_matriz: "osrm",
+    };
+
+    return {
+      fecha_planificacion: fecha,
+      generado_en: generadoEn || new Date().toISOString(),
+      revisado_en: new Date().toISOString(),
+      revisado_por: { usuario_id: u.id, nombre: u.nombre, rol: u.rol },
+      resumen_corrida: resumenCorrida,
+      rutas,
+      pendientes: propuesta.pendientes.map(p => ({
+        ot_id: p.id, tipo: p.tipo, direccion: p.direccion,
+        causa_principal: p.causaPrincipal || null, causas: p.causas || [],
+      })),
+      propuesta_modificada: propuestaModificada,
+      tipo_modificacion: Array.from(tiposModificacion),
+    };
+  };
+
+  // Al confirmar hay dos caminos (ver header de data.js):
+  //  - Primera confirmación (esReedicion=false): se manda el PLAN
+  //    COMPLETO por POST /asignar-tecnicos, como siempre.
+  //  - Reprogramación (esReedicion=true, se reabrió un plan ya
+  //    confirmado): mandar el plan entero de nuevo duplicaría sin razón
+  //    lo que no cambió — en vez de eso, se manda UNA llamada PATCH por
+  //    cada OT que efectivamente cambió, cada una con el motivo que se
+  //    le pidió al momento de editarla (ver pedirMotivoSiCorresponde).
+  //    Si a alguna le falta el motivo, no se manda nada todavía.
+  const onConfirmar = async () => {
+    const r = window.RUTAS_EXTERNO_OPTIMIZER.validarConfirmacion(propuesta.porTecnico);
+    if (!r.ok) { setError(r.duplicado); return; }
+
+    const otIdsCambiados = esReedicion ? calcularOtIdsCambiados(propuesta, propuestaOriginal) : new Set();
+    if (esReedicion && Array.from(otIdsCambiados).some(id => !motivosPorOt[id])) {
+      setError("Falta el motivo de reprogramación de alguna OT editada.");
+      return;
+    }
+
+    setConfirmando(true);
+    setError(null);
+    try {
+      if (esReedicion) {
+        // Dónde vive AHORA cada OT que cambió, para saber a qué técnico
+        // mandarla en el PATCH. Las que quedaron en pendientes (sin
+        // técnico) no se pueden representar en este endpoint — se
+        // avisa aparte en vez de fallar todo el guardado.
+        const tecnicoActualDe = {};
+        Object.entries(propuesta.porTecnico).forEach(([tid, { paradas }]) => {
+          paradas.forEach(p => { tecnicoActualDe[p.id] = tid; });
+        });
+        // Dónde vivía cada OT ANTES de esta sesión de edición — para
+        // distinguir "la movieron a otro técnico" de "se reordenó dentro
+        // del mismo técnico" (mismo vocabulario que usa el plan completo).
+        const original = propuestaOriginal || propuesta;
+        const tecnicoOriginalDe = {};
+        Object.entries(original.porTecnico).forEach(([tid, { paradas }]) => {
+          paradas.forEach(p => { tecnicoOriginalDe[p.id] = tid; });
+        });
+        const u = CP_DATA.usuarios[0];
+        const revisadoPor = { usuario_id: u.id, nombre: u.nombre, rol: u.rol };
+        const otIdsList = Array.from(otIdsCambiados);
+        // Las que quedaron en pendientes (sin técnico) también se
+        // intentan — hoy el endpoint exige tecnico_id como string, así
+        // que esto va a fallar con 422 hasta que lo acepten como
+        // opcional/null, pero se manda igual para que funcione solo
+        // apenas lo agreguen del otro lado (ver prompt pendiente).
+        const resultados = await Promise.allSettled(
+          otIdsList.map(otId => {
+            const tecnicoId = tecnicoActualDe[otId] || null;
+            const tipoModificacion = !tecnicoId
+              ? "OT descartada"
+              : tecnicoOriginalDe[otId] !== tecnicoId ? "OT asignada a otro técnico" : "OT reordenada";
+            return window.RUTAS_EXTERNO_API.patchTecnicoOt(otId, tecnicoId, motivosPorOt[otId], revisadoPor, tipoModificacion);
+          })
+        );
+        // No se bloquea el guardado entero por esto: cada PATCH es una
+        // llamada independiente, así que las que sí funcionaron ya
+        // quedaron guardadas — frenar todo acá solo escondería ese
+        // progreso real detrás de un error genérico.
+        const exitosas = [];
+        const fallidas = [];
+        resultados.forEach((r, i) => {
+          if (r.status === "fulfilled") exitosas.push(otIdsList[i]);
+          else fallidas.push({ otId: otIdsList[i], motivo: r.reason?.message || "error desconocido" });
+        });
+
+        setConfirmados(prev => ({ ...prev, [fecha]: { porTecnico: propuesta.porTecnico, fecha, generadoEn } }));
+        if (fallidas.length > 0) {
+          // Se queda en esta pantalla con el error a la vista — si
+          // navegara a selección, PropuestaPanel (donde se muestra el
+          // error) se desmonta y el aviso desaparece antes de que se
+          // alcance a leer. Lo ya guardado no se pierde (cada PATCH es
+          // independiente); solo falta resolver lo que no se guardó.
+          setError(`${exitosas.length} OT guardadas, ${fallidas.length} no se pudieron guardar: ${fallidas.map(f => `${f.otId} (${f.motivo})`).join("; ")}`);
+          onToast?.(`Plan reprogramado parcialmente — ${exitosas.length} de ${otIdsList.length} OT guardadas`);
+          setConfirmando(false);
+          return;
+        }
+        onToast?.(`Plan reprogramado — ${exitosas.length} OT actualizadas`);
+      } else {
+        const payload = construirPayloadAsignaciones();
+        await window.RUTAS_EXTERNO_API.confirmarAsignaciones(payload);
+        setConfirmados(prev => ({ ...prev, [fecha]: { porTecnico: propuesta.porTecnico, fecha, generadoEn } }));
+        onToast?.("Plan de rutas confirmado y guardado");
+      }
+      setPropuesta(null);
+      setPropuestaOriginal(null);
+      setGeneradoEn(null);
+      setResumen(null);
+      setError(null);
+      setEsReedicion(false);
+      setMotivosPorOt({});
+      setOtPidiendoMotivo(null);
+      setEtapa("seleccion");
+    } catch (err) {
+      setError(`No se pudo guardar la confirmación: ${err.message}`);
+    } finally {
+      setConfirmando(false);
+    }
   };
 
   return (
@@ -774,9 +1524,12 @@ function RutasExternoScreen({ onToast }) {
         <div>
           <div className="page-title">Asignación de rutas</div>
         </div>
+        <div className="page-head-actions">
+          <button className="btn btn-primary" style={{ padding: "10px 18px", fontSize: 14 }} onClick={() => go("rutasExternoRegistro")}>
+            <Icon name="clock" />Consultar asignaciones registradas
+          </button>
+        </div>
       </div>
-
-      <RegistroAsignaciones fechaInicial={fecha} />
 
       {etapa === "seleccion" && Object.values(confirmados)
         .filter(c => Object.values(c.porTecnico).some(({ paradas }) => paradas.length > 0))
@@ -795,13 +1548,26 @@ function RutasExternoScreen({ onToast }) {
           onToggleTodosOts={setTodosOts} onToggleTodosTec={setTodosTec} onOptimizar={onOptimizar}
           optimizando={optimizando} error={error} />
       ) : (
-        <PropuestaPanel propuesta={propuesta} resumen={resumen} error={error}
+        <PropuestaPanel propuesta={propuesta} propuestaOriginal={propuestaOriginal} resumen={resumen} error={error} recalculando={recalculando} erroresTecnico={erroresTecnico} confirmando={confirmando}
           onMoveUp={onMoveUp} onMoveDown={onMoveDown} onMover={onMover} onEliminar={onEliminar}
           onMoverPendiente={onMoverPendiente}
-          onVolver={onVolver} onConfirmar={onConfirmar} />
+          onVolver={onVolver} onConfirmar={onConfirmar}
+          esReedicion={esReedicion} motivosPorOt={motivosPorOt} />
       )}
+
+      {otPidiendoMotivo && (
+        <MotivoReprogramacionModal
+          ot={buscarOtEnPropuesta(propuesta, otPidiendoMotivo)}
+          onGuardar={(motivo) => {
+            setMotivosPorOt(prev => ({ ...prev, [otPidiendoMotivo]: motivo }));
+            setOtPidiendoMotivo(null);
+          }}
+        />
+      )}
+      {optimizando && <CargandoOverlay mensaje="Optimizando planificación…" />}
+      {confirmando && <CargandoOverlay mensaje={esReedicion ? "Reprogramando…" : "Asignando…"} />}
     </div>
   );
 }
 
-Object.assign(window, { RutasExternoScreen });
+Object.assign(window, { RutasExternoScreen, RegistroAsignacionesScreen });

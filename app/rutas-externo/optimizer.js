@@ -86,5 +86,91 @@
     return { ok: !duplicado, duplicado, fueraDeVentana };
   }
 
-  window.RUTAS_EXTERNO_OPTIMIZER = { validarConfirmacion, calcularLlegadas, haversineKm, minAHhmm };
+  /* Recalcula hora de salida/retorno, km totales, espera total y
+     capacidad de un técnico con datos REALES — a diferencia de todo lo
+     de arriba (haversine + velocidad/servicio fijos, que es la
+     aproximación que traía el optimizador local viejo): ruteo real por
+     calle tramo a tramo (OSRM vía /ruteo/geometria — ese endpoint no
+     desglosa un trazado de varios puntos en una sola llamada, por eso se
+     pide un tramo a la vez) y la configuración real de negocio (jornada,
+     duración de servicio por tipo de OT, capacidad — HU-16). Se usa para
+     mantener el encabezado de la tarjeta al día cuando la coordinadora
+     mueve/reordena/quita paradas a mano (HU-03), en vez de dejar los
+     números de la corrida original ya desactualizados.
+     `obtenerGeometriaRuta` se inyecta (viene de RUTAS_EXTERNO_API) para no
+     duplicar acá la URL del backend. */
+  // `violaciones` acá son las restricciones "obvias" que la coordinadora
+  // pidió aplicar al editar a mano: capacidad máxima del técnico y que la
+  // ruta no termine después del fin de jornada ni haga llegar una OT
+  // después de su propia ventana. RutasExterno.jsx revierte la edición si
+  // alguna de estas sale true — no es solo un aviso.
+  function evaluarViolaciones(paradasActualizadas, capacidadMax, horaRetornoBaseMin, finJornadaMin) {
+    const sobrecapacidad = paradasActualizadas.length > capacidadMax;
+    const excedeJornada = horaRetornoBaseMin > finJornadaMin;
+    const otsFueraDeVentana = paradasActualizadas.filter(p => hhmmAMin(p.horaEstimadaLlegada) > hhmmAMin(p.ventanaFin));
+    return { hay: sobrecapacidad || excedeJornada || otsFueraDeVentana.length > 0, sobrecapacidad, excedeJornada, otsFueraDeVentana };
+  }
+
+  async function recalcularResumenRuta(tecnico, paradas, config, obtenerGeometriaRuta) {
+    const capacidadMax = tecnico.tipo === "interno"
+      ? (config?.capacidad_max_interno ?? 12)
+      : (config?.capacidad_max_externo ?? 8);
+    const jornadaInicioMin = (config?.inicio_jornada_horas ?? 8) * 60;
+    const finJornadaMin = jornadaInicioMin + (config?.fin_jornada_minutos ?? 600);
+
+    if (paradas.length === 0) {
+      return {
+        paradas: [],
+        resumen: { horaSalidaBase: null, horaRetornoBase: null, distanciaTotalKm: 0, esperaTotalMin: 0, capacidadUso: `0/${capacidadMax}` },
+        violaciones: { hay: false, sobrecapacidad: false, excedeJornada: false, otsFueraDeVentana: [] },
+      };
+    }
+
+    const tiemposServicio = config?.tiempos_servicio_por_tipo || {};
+    const servicioDefault = config?.tiempo_servicio_default ?? 30;
+
+    const puntos = [
+      { lat: tecnico.lat, lng: tecnico.lng },
+      ...paradas.map(p => ({ lat: p.lat, lng: p.lng })),
+      { lat: tecnico.lat, lng: tecnico.lng },
+    ];
+    // Un tramo por par consecutivo de puntos, todos en paralelo (no
+    // dependen uno del otro) para no sumar latencia de red por cada
+    // parada de la ruta.
+    const legsRaw = await Promise.all(
+      Array.from({ length: puntos.length - 1 }, (_, i) => obtenerGeometriaRuta([puntos[i], puntos[i + 1]]))
+    );
+    const legs = legsRaw.map(geo => ({ km: (geo.distancia_metros || 0) / 1000, min: (geo.duracion_segundos || 0) / 60 }));
+
+    let clock = jornadaInicioMin;
+    let distanciaTotalKm = 0;
+    let esperaTotalMin = 0;
+    const paradasActualizadas = paradas.map((p, i) => {
+      const leg = legs[i];
+      distanciaTotalKm += leg.km;
+      clock += leg.min;
+      const ventanaInicioMin = hhmmAMin(p.ventanaInicio);
+      let espera = 0;
+      if (clock < ventanaInicioMin) { espera = ventanaInicioMin - clock; clock = ventanaInicioMin; }
+      const horaEstimadaLlegada = minAHhmm(clock);
+      const tiempoServicio = tiemposServicio[p.tipo] ?? servicioDefault;
+      clock += tiempoServicio;
+      esperaTotalMin += espera;
+      return { ...p, horaEstimadaLlegada, esperaMin: Math.round(espera) };
+    });
+    const legVuelta = legs[legs.length - 1];
+    distanciaTotalKm += legVuelta.km;
+    clock += legVuelta.min;
+
+    const resumen = {
+      horaSalidaBase: minAHhmm(jornadaInicioMin),
+      horaRetornoBase: minAHhmm(clock),
+      distanciaTotalKm,
+      esperaTotalMin: Math.round(esperaTotalMin),
+      capacidadUso: `${paradas.length}/${capacidadMax}`,
+    };
+    return { paradas: paradasActualizadas, resumen, violaciones: evaluarViolaciones(paradasActualizadas, capacidadMax, clock, finJornadaMin) };
+  }
+
+  window.RUTAS_EXTERNO_OPTIMIZER = { validarConfirmacion, calcularLlegadas, haversineKm, minAHhmm, recalcularResumenRuta };
 })();

@@ -18,6 +18,10 @@ function GoodRouteNavGroup({ route, go }) {
             <Icon name="dashboard" />
             Dashboard
           </button>
+          <button type="button" className={"nav-item" + (route.screen === "settings" && route.params.section === "optimizador" ? " active" : "")} onClick={() => go("settings", { section: "optimizador" })}>
+            <Icon name="sliders" />
+            Configuración
+          </button>
         </div>
       )}
     </div>

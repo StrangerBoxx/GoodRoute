@@ -1,5 +1,5 @@
 /* ============ Shared UI primitives + helpers ============ */
-const { useState, useEffect, useRef, useMemo } = React;
+const { useState, useEffect, useLayoutEffect, useRef, useMemo } = React;
 
 /* ---- Icon set (functional line icons) ---- */
 const ICONS = {
@@ -48,6 +48,7 @@ const ICONS = {
   arrowUpDown: "M21 16l-4 4-4-4M17 20V4M3 8l4-4 4 4M7 4v16",
   inbox: "M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z",
   download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
+  sliders: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
 };
 function Icon({ name, style }) {
   const d = ICONS[name] || "";
@@ -128,6 +129,20 @@ function otEstadoLabel(ot) {
 function Toast({ msg, onDone }) {
   useEffect(() => { const x = setTimeout(onDone, 2600); return () => clearTimeout(x); }, []);
   return <div className="toast"><Icon name="checkC" />{msg}</div>;
+}
+
+/* ---- Overlay de carga a pantalla completa — para operaciones que
+   bloquean la pantalla mientras esperan al backend (optimizar, guardar,
+   confirmar), no solo el ícono del botón que la dispara. ---- */
+function CargandoOverlay({ mensaje }) {
+  return (
+    <div className="overlay">
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+        <span className="icon-spin" style={{ color: "var(--accent)" }}><Icon name="refresh" style={{ width: 40, height: 40 }} /></span>
+        {mensaje && <div style={{ color: "#fff", fontWeight: 600 }}>{mensaje}</div>}
+      </div>
+    </div>
+  );
 }
 
 /* CLP money */

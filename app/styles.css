@@ -557,10 +557,29 @@ a { color: inherit; text-decoration: none; }
 .route-mod svg { width: 14px; height: 14px; flex: none; }
 .route-warn { display: flex; align-items: center; gap: 8px; padding: 9px 18px; background: var(--amber-bg); color: var(--amber-fg); font-size: 12px; font-weight: 550; }
 .route-warn svg { width: 14px; height: 14px; flex: none; }
+
+/* ---- Mapa de ruta (Leaflet, en "Asignaciones registradas") ----
+   Leaflet necesita que su contenedor tenga una altura explícita antes de
+   montarse, si no el mapa queda en blanco/roto. */
+.ruta-mapa { height: 280px; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border-2); }
+/* Nota: L.divIcon({className}) REEMPLAZA la clase por defecto de Leaflet
+   ("leaflet-div-icon") en vez de agregarla — por eso estos selectores
+   apuntan solo a .map-pin, sin ese prefijo (si no, el fondo queda
+   transparente y solo se ve el número/letra). */
+.map-pin { background: var(--accent); color: #fff; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(20,15,15,.35); }
+.map-pin.map-pin-base { background: var(--text); }
+/* inicio y destino final del trayecto se distinguen por color del resto
+   de paradas numeradas, para que se note el sentido del recorrido */
+.map-pin.map-pin-start { background: #15803d; }
+.map-pin.map-pin-end { background: #b91c1c; width: 26px; height: 26px; font-size: 13px; }
 .route-stops { padding: 6px 0; }
 .route-stop { display: flex; align-items: center; gap: 12px; padding: 11px 18px; border-bottom: 1px solid var(--border); }
 .route-stop:last-child { border-bottom: none; }
 .route-stop.nueva { background: var(--violet-bg); }
+/* Parada movida/reordenada/nueva en esta ruta respecto al plan ya
+   confirmado (o a la propuesta del optimizador) — visual para que la
+   coordinadora vea de un vistazo qué cambió al reeditar (HU-03/18). */
+.route-stop-cambiada { background: var(--amber-bg); }
 .stop-n { width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-strong); font-size: 11.5px; font-weight: 700; display: grid; place-items: center; flex: none; }
 .stop-cliente { font-weight: 600; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
 .stop-dir { font-size: 11.5px; color: var(--text-2); display: flex; align-items: center; gap: 5px; margin-top: 3px; }
@@ -585,6 +604,8 @@ a { color: inherit; text-decoration: none; }
 .rx-check-row:hover { background: var(--surface-2); }
 .rx-check-row input[type="checkbox"] { width: 16px; height: 16px; flex: none; accent-color: var(--accent); }
 .rx-actions { display: flex; align-items: center; gap: 12px; }
+.rx-error-tecnico { opacity: 1; transition: opacity .3s ease, transform .3s ease; }
+.rx-error-tecnico.saliendo { opacity: 0; transform: translateY(-3px); }
 .rx-stop-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 .move-item .mi-zone { font-size: 11px; color: var(--text-3); }
 

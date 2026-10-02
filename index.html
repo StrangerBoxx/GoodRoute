@@ -7,6 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <!-- Mapa de la ruta (Asignación de rutas → Asignaciones registradas): Leaflet + mosaicos de OpenStreetMap, sin API key. -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
   <link rel="stylesheet" href="app/styles.css" />
 </head>
 <body>
@@ -27,6 +29,7 @@
        con hojas/estilos reales y permite incrustar el gráfico (como
        imagen rasterizada, igual que en el PDF) dentro de la hoja. -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js" integrity="sha384-Pqp51FUN2/qzfxZxBCtF0stpc9ONI6MYZpVqmo8m20SoaQCzf+arZvACkLkirlPz" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 
   <script src="app/data.js"></script>
   <script src="app/logo.js"></script>
@@ -34,6 +37,7 @@
   <script src="app/rutas-externo/optimizer.js"></script>
   <script type="text/babel" src="app/ui.jsx"></script>
   <script type="text/babel" src="app/rutas-externo/RutasExterno.jsx"></script>
+  <script type="text/babel" src="app/rutas-externo/configuracion.jsx"></script>
   <script type="text/babel" src="app/auth.jsx"></script>
   <script type="text/babel" src="app/evidence.jsx"></script>
   <script type="text/babel" src="app/layout.jsx"></script>

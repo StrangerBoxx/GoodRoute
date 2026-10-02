@@ -3,32 +3,46 @@
    ------------------------------------------------------------
    Backend real: https://optimizador-demo.onrender.com
    Contrato confirmado con el equipo de optimización (mensaje del
-   30/09/2026). Un solo backend sirve tanto los datos del panel
+   30/09/2026, ampliado el 01/10/2026 con causa clasificada y el catálogo
+   de configuración). Un solo backend sirve tanto los datos del panel
    (técnicos, OT) como la optimización en sí — ya no son dos
    servicios separados como antes.
 
    Circuito conectado por ahora (alcance "básico", HU-17):
      GET  /api/tecnicos                    lista de técnicos
      GET  /api/ordenes?estado=por_asignar  OT elegibles
-     POST /api/optimizador/ejecutar        corre la optimización
+     POST /api/optimizador/ejecutar        corre la optimización (causa
+       clasificada real en diagnosticos[]: causa_principal/causas[]/
+       precision_ubicacion — ya no hace falta parsear "razones")
      GET  /api/rutas?fecha=                consultar el registro (HU-18,
        de solo lectura por ahora — ver nota de aplicar_cambios más abajo)
+     GET  /api/ruteo/geometria             trazado real por calle (mapa
+       de "Asignaciones registradas") — devuelve coordenadas (vía OSRM),
+       no una imagen; el mapa se dibuja con Leaflet en el frontend.
+     GET  /api/optimizador/configuracion/parametros  catálogo de
+       parámetros (HU-16) — la UI filtra ambito=="negocio"
+     GET/PUT /api/optimizador/configuracion          leer/guardar esos
+       parámetros (PUT solo con las claves a cambiar; fuera de rango 422)
+     POST /api/optimizador/configuracion/restaurar   volver a los defaults
+
+   Persistencia del plan confirmado (HU-18) — backend DISTINTO, del
+   equipo de base de datos (confirmado el 01/10/2026):
+     POST https://api-dummy-yurf.onrender.com/api/asignar-tecnicos
+       Se llama una sola vez al confirmar el plan (onConfirmar), nunca al
+       solo ejecutar el optimizador (eso sigue siendo una simulación
+       descartable). Reemplaza la idea original de persistir vía
+       aplicar_cambios:true en /ejecutar del optimizador — ese camino
+       seguía bloqueado (volver a resolver podía no respetar las
+       ediciones manuales); este endpoint recibe el plan YA armado
+       (propuesto + final + qué se editó a mano), así que no hace falta
+       volver a resolver nada.
 
    Deliberadamente NO conectado todavía (próxima etapa):
-     GET/PUT /api/optimizador/configuracion   panel de parámetros (HU-16:
-       falta que el equipo del optimizador documente cuáles son de la
-       operación del cliente y cuáles son supuestos internos del solver)
-     POST    /api/optimizador/configuracion/restaurar
      POST    /api/simulacion/regenerar        regenerar datos de prueba
      GET     /api/metricas/resumen-diario     indicadores del día
-     GET     /api/ruteo/geometria             trazado por calles (mapa)
-     GET     /api/optimizador/pendientes      (alternativa a los
-       diagnósticos que ya vienen inline en la respuesta de ejecutar)
-     PATCH   /ordenes/{id}/tecnico, PATCH /ordenes/asignaciones-masivas,
-       aplicar_cambios:true en /ejecutar — la escritura real del registro
-       (HU-18, criterio de persistir con ajustes manuales incluidos).
-       Sin probar: son escrituras sobre el backend compartido, no algo
-       para disparar sin avisar primero.
+     GET     /api/optimizador/modelo          declaración del modelo
+       (catálogo de causas_no_asignacion — no se usa en la UI todavía,
+       las causas llegan igual inline en el diagnóstico de cada OT)
    ============================================================ */
 (function () {
   const API_BASE_URL = "https://optimizador-demo.onrender.com/api";
@@ -144,18 +158,21 @@
   }
 
   // Ejecuta la optimización real (POST /api/optimizador/ejecutar).
-  // aplicar_cambios queda siempre en false por ahora: "Confirmar plan" en
-  // esta pantalla todavía guarda el resultado solo en sessionStorage, no
-  // escribe de vuelta en el backend — ver comentario en onConfirmar()
-  // dentro de RutasExterno.jsx sobre por qué eso queda para otra etapa.
-  async function ejecutarOptimizacion({ fecha, tecnicos, ordenes, tiempoLimiteSegundos = 10 }) {
-    return postJSON(`${API_BASE_URL}/optimizador/ejecutar`, {
-      fecha,
-      aplicar_cambios: false,
-      tiempo_limite_segundos: tiempoLimiteSegundos,
-      tecnicos,
-      ordenes,
-    });
+  // aplicar_cambios se manda SIEMPRE explícito en false acá: esta llamada
+  // es para generar la propuesta que se revisa/edita en pantalla, no para
+  // persistirla (eso es "Confirmar plan" — ver onConfirmar() en
+  // RutasExterno.jsx, todavía sin conectar: falta que el equipo del
+  // optimizador defina cómo persistir el plan tal como queda editado acá,
+  // sin volver a resolver desde cero). Mandarlo explícito importa: si la
+  // planificadora deja "Aplicar asignaciones automáticamente" en true
+  // desde el panel de configuración, esta llamada de solo-vista-previa NO
+  // debe heredar ese default y aplicar cambios por sorpresa.
+  // tiempo_limite_segundos sí se deja opcional: si no se pasa, el backend
+  // lo calcula según la cantidad de OTs (comportamiento recomendado).
+  async function ejecutarOptimizacion({ fecha, tecnicos, ordenes, tiempoLimiteSegundos }) {
+    const body = { fecha, aplicar_cambios: false, tecnicos, ordenes };
+    if (tiempoLimiteSegundos != null) body.tiempo_limite_segundos = tiempoLimiteSegundos;
+    return postJSON(`${API_BASE_URL}/optimizador/ejecutar`, body);
   }
 
   // Consulta el registro real de asignaciones de un día (HU-18, criterio
@@ -166,10 +183,141 @@
     return fetchJSON(`${API_BASE_URL}/rutas?fecha=${encodeURIComponent(fecha)}`);
   }
 
+  // Trazado real por calle de una ruta (OSRM), para dibujarla en el mapa
+  // de "Asignaciones registradas". Devuelve { coordenadas: [[lat,lng], ...],
+  // distancia_metros, duracion_segundos } — no una imagen, el dibujo lo
+  // hace Leaflet en el frontend con esto.
+  // `puntos` es [{lat, lng}, ...] en el orden que se recorren (típicamente
+  // base del técnico, luego cada parada en secuencia) — el endpoint pide
+  // "lon,lat;lon,lat;..." (invertido respecto al orden en que se guarda acá).
+  async function obtenerGeometriaRuta(puntos) {
+    const coordenadas = puntos.map(p => `${p.lng},${p.lat}`).join(";");
+    return fetchJSON(`${API_BASE_URL}/ruteo/geometria?coordenadas=${encodeURIComponent(coordenadas)}`);
+  }
+
+  // Catálogo de parámetros configurables (HU-16): de qué consta el panel
+  // de configuración de negocio. Se filtra por ambito=="negocio" en la UI
+  // — ambito solver/servicio son del equipo técnico, no se muestran acá.
+  async function obtenerCatalogoParametros() {
+    return fetchJSON(`${API_BASE_URL}/optimizador/configuracion/parametros`);
+  }
+
+  // Valores vigentes de TODOS los parámetros (negocio + solver + servicio)
+  // — la UI solo edita las claves de ambito=="negocio", pero necesita el
+  // mapa completo para no perder de vista las demás.
+  async function obtenerConfiguracion() {
+    return fetchJSON(`${API_BASE_URL}/optimizador/configuracion`);
+  }
+
+  // PUT solo con las claves que cambiaron (no hace falta mandar todo el
+  // objeto). Fuera de rango responde 422 con el detalle de qué clave falló
+  // — se intenta extraer ese detalle para mostrarlo en vez de "422" a secas.
+  async function guardarConfiguracion(cambios) {
+    const res = await fetch(`${API_BASE_URL}/optimizador/configuracion`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cambios),
+    });
+    if (!res.ok) {
+      let detalle = `respondió ${res.status}`;
+      try {
+        const data = await res.json();
+        if (typeof data.detail === "string") detalle = data.detail;
+        else if (Array.isArray(data.detail)) detalle = data.detail.map(d => `${(d.loc || []).join(".")}: ${d.msg}`).join("; ");
+      } catch {}
+      throw new Error(detalle);
+    }
+    return res.json();
+  }
+
+  // Vuelve todos los parámetros a su valor por defecto. La configuración
+  // vive en memoria del lado del servicio — se pierde igual al reiniciar.
+  async function restaurarConfiguracion() {
+    return postJSON(`${API_BASE_URL}/optimizador/configuracion/restaurar`, {});
+  }
+
+  /* ----------------------------------------------------------
+     Persistencia del plan confirmado (HU-18) — backend DISTINTO: el del
+     equipo de base de datos (confirmado por ellos el 01/10/2026), no el
+     optimizador. Contrato verificado contra su /openapi.json — coincide
+     con el schema que les pasamos (AsignarTecnicosRequest/RutaTecnico/
+     ParadaRuta/ResumenCorrida/RevisadoPor).
+
+     Dos caminos, según el momento:
+       - Primera confirmación de un plan (recién salido del optimizador):
+         POST /asignar-tecnicos con el plan COMPLETO (ver confirmarAsignaciones).
+       - Reprogramación (se reabre un plan YA confirmado y se mueve/saca
+         alguna OT): mandar el plan completo de nuevo duplicaría/pisaría
+         sin motivo las OT que no se tocaron — en vez de eso, se llama
+         PATCH /ordenes/{id}/tecnico UNA VEZ POR CADA OT que cambió (ver
+         patchTecnicoOt), cada una con su propio motivo_reprogramacion.
+         Probado contra el backend real: acepta campos extra sin
+         problema (motivo_reprogramacion no está en su schema todavía,
+         lo ignora hasta que lo agreguen) y persiste tecnico_id/estado.
+     ---------------------------------------------------------- */
+  const ASIGNACIONES_API_BASE_URL = "https://api-dummy-yurf.onrender.com/api";
+
+  async function manejarRespuestaAsignaciones(res) {
+    if (!res.ok) {
+      let detalle = `respondió ${res.status}`;
+      try {
+        const data = await res.json();
+        if (typeof data.detail === "string") detalle = data.detail;
+        else if (Array.isArray(data.detail)) detalle = data.detail.map(d => `${(d.loc || []).join(".")}: ${d.msg}`).join("; ");
+      } catch {}
+      throw new Error(detalle);
+    }
+    return res.json();
+  }
+
+  async function confirmarAsignaciones(payload) {
+    const res = await fetch(`${ASIGNACIONES_API_BASE_URL}/asignar-tecnicos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return manejarRespuestaAsignaciones(res);
+  }
+
+  // Reprogramación de UNA OT puntual (HU-18) — no manda el plan entero,
+  // solo la OT que cambió de técnico, con su propio motivo. El endpoint
+  // ahora persiste en Postgres (02/10/2026, antes solo actualizaba en
+  // memoria) y confirma con "guardado_en_bd" en la respuesta — si por lo
+  // que sea volviera a venir en false, se trata como error en vez de
+  // darlo por guardado solo porque el HTTP fue 200.
+  //
+  // `revisado_por` (el dispatcher/coordinador de turno que hizo la
+  // reprogramación) y `tipo_modificacion` (qué le pasó a esta OT puntual:
+  // "OT asignada a otro técnico" | "OT reordenada" | "OT descartada") se
+  // mandan con la misma forma/vocabulario que ya usa el POST del plan
+  // completo — hoy el schema de este PATCH no los tiene declarados (solo
+  // tecnico_id/motivo_reprogramacion), así que de momento el backend los
+  // va a ignorar hasta que los agreguen de su lado. Se mandan igual para
+  // no tener que volver a tocar el frontend cuando los sumen.
+  async function patchTecnicoOt(otId, tecnicoId, motivoReprogramacion, revisadoPor, tipoModificacion) {
+    const res = await fetch(`${ASIGNACIONES_API_BASE_URL}/ordenes/${encodeURIComponent(otId)}/tecnico`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tecnico_id: tecnicoId,
+        motivo_reprogramacion: motivoReprogramacion,
+        revisado_por: revisadoPor,
+        tipo_modificacion: tipoModificacion,
+      }),
+    });
+    const data = await manejarRespuestaAsignaciones(res);
+    if (data && data.guardado_en_bd === false) {
+      throw new Error(`${otId} se actualizó pero no se pudo guardar en la base de datos.`);
+    }
+    return data;
+  }
+
   window.RUTAS_EXTERNO_API = {
     API_BASE_URL, hoyISO, sumarDiasISO, fetchJSON,
     obtenerTecnicos, obtenerOtsPorAsignar,
-    ejecutarOptimizacion, obtenerRutasRegistradas,
+    ejecutarOptimizacion, obtenerRutasRegistradas, obtenerGeometriaRuta,
+    obtenerCatalogoParametros, obtenerConfiguracion, guardarConfiguracion, restaurarConfiguracion,
+    confirmarAsignaciones, patchTecnicoOt,
     // Compartidos para reconstruir objetos ot/técnico a partir de la
     // respuesta de ejecutarOptimizacion (ver onOptimizar en RutasExterno.jsx).
     TIPO_OT_LABEL, sumarMinutos, colorPorId,
