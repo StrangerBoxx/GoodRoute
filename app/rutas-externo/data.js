@@ -14,8 +14,6 @@
      POST /api/optimizador/ejecutar        corre la optimización (causa
        clasificada real en diagnosticos[]: causa_principal/causas[]/
        precision_ubicacion — ya no hace falta parsear "razones")
-     GET  /api/rutas?fecha=                consultar el registro (HU-18,
-       de solo lectura por ahora — ver nota de aplicar_cambios más abajo)
      GET  /api/ruteo/geometria             trazado real por calle (mapa
        de "Asignaciones registradas") — devuelve coordenadas (vía OSRM),
        no una imagen; el mapa se dibuja con Leaflet en el frontend.
@@ -36,6 +34,14 @@
        ediciones manuales); este endpoint recibe el plan YA armado
        (propuesto + final + qué se editó a mano), así que no hace falta
        volver a resolver nada.
+     GET /api/ordenes + GET /api/tecnicos (mismo backend de arriba)
+       "Rutas confirmadas" (HU-18, consultar sin salir del asignador) se
+       reconstruye cruzando estos dos — este backend no tiene todavía un
+       GET dedicado para listar asignaciones por fecha (ver
+       obtenerRutasRegistradas más abajo, con el detalle del bug real que
+       tenía esto hasta el 04/10/2026: pegaba contra el /api/rutas del
+       OTRO backend, el del optimizador, que nunca refleja lo confirmado
+       acá).
 
    Deliberadamente NO conectado todavía (próxima etapa):
      POST    /api/simulacion/regenerar        regenerar datos de prueba
@@ -138,6 +144,12 @@
       direccion: o.comuna ? `${o.direccion_instalacion}, ${o.comuna}` : o.direccion_instalacion,
       comuna: o.comuna,
       region: o.region,
+      // Día para el que está programada esta OT (puede venir null = sin
+      // día asignado todavía) — antes no se usaba para nada, la pantalla
+      // mostraba las mismas OT sin importar la fecha elegida en el
+      // selector (ver el comentario de más abajo, en el efecto que carga
+      // técnicos/OT). Ahora sí filtra por día (ver RutasExterno.jsx).
+      fechaProgramada: o.fecha_programada || null,
       horaProgramada: o.hora_programada || null,
       ventanaInicio: o.hora_programada ? sumarMinutos(o.hora_programada, -30) : "08:00",
       ventanaFin: o.hora_programada ? sumarMinutos(o.hora_programada, 30) : "18:00",
@@ -176,11 +188,95 @@
   }
 
   // Consulta el registro real de asignaciones de un día (HU-18, criterio
-  // "consultables desde la UI sin salir del asignador"). Solo lectura —
-  // hoy siempre devuelve [] porque nunca se ejecutó con aplicar_cambios
-  // en true, no porque el endpoint falle.
+  // "consultables desde la UI sin salir del asignador").
+  //
+  // BUG encontrado el 04/10/2026: esto pegaba contra GET /api/rutas del
+  // backend del OPTIMIZADOR (API_BASE_URL, optimizador-demo) — ese
+  // endpoint refleja el estado en memoria de la ÚLTIMA corrida ejecutada
+  // con aplicar_cambios:true en /ejecutar, algo que este frontend NUNCA
+  // hace a propósito (ejecutarOptimizacion más arriba manda ese flag
+  // siempre en false: la corrida de /ejecutar es una vista previa
+  // descartable, lo que persiste de verdad es el POST /asignar-tecnicos
+  // de más abajo, a un backend DISTINTO). Probado contra el endpoint
+  // real: con ese flag siempre en false, /api/rutas devuelve todos los
+  // técnicos con paradas:[] para SIEMPRE — no tenía ninguna relación con
+  // lo que se confirmaba acá. Por eso "Rutas confirmadas" nunca mostraba
+  // nada real (ni siquiera recién confirmado, en la misma sesión); lo
+  // único que daba la sensación de que "a veces funcionaba" era el
+  // listado de confirmados en sessionStorage (RutasExterno.jsx,
+  // RX_KEYS.confirmados), que se pierde al cerrar la pestaña/el
+  // navegador — de ahí "solo si sigo el flujo, al cerrar y abrir se
+  // pierde".
+  //
+  // El backend de persistencia real (ASIGNACIONES_API_BASE_URL,
+  // api-dummy-yurf) sí guarda bien el tecnico_id de cada OT al confirmar
+  // (POST /asignar-tecnicos) y al reprogramar (PATCH
+  // /ordenes/{id}/tecnico) — verificado contra su propio GET /api/ordenes,
+  // que muestra el tecnico_id ya persistido. Lo que no tiene todavía es
+  // un GET dedicado para listar asignaciones por fecha, así que se
+  // reconstruye acá cruzando /api/ordenes (filtradas por fecha_programada
+  // y con tecnico_id asignado) con /api/tecnicos de ESE mismo backend.
+  // Nota: esas OT no traen latitud/longitud ni la base del técnico, así
+  // que "Ver en mapa" en el registro queda sin datos para trazar hasta
+  // que el equipo de BD agregue esos campos o un endpoint propio — se
+  // avisa solo, ya maneja el caso de "no hay puntos" (ver verEnMapa en
+  // RutasExterno.jsx), no se cae.
+  // Agrupa TODAS las OT con técnico asignado por fecha_programada y
+  // luego por técnico — un solo fetch sirve tanto para consultar un día
+  // puntual (obtenerRutasRegistradas) como para descubrir TODAS las
+  // fechas que tienen algo confirmado, sin tener que adivinarlas ni
+  // pedir fecha por fecha (ver obtenerAsignacionesConfirmadasPorFecha,
+  // usada para rehidratar el banner "Rutas confirmadas" de cada día al
+  // abrir la pantalla).
+  async function agruparAsignacionesConfirmadas() {
+    const [ordenes, tecnicos] = await Promise.all([
+      fetchJSON(`${ASIGNACIONES_API_BASE_URL}/ordenes`),
+      fetchJSON(`${ASIGNACIONES_API_BASE_URL}/tecnicos`),
+    ]);
+    const tecnicoPorId = Object.fromEntries(tecnicos.map(t => [t.id, t]));
+    const porFecha = {};
+    ordenes
+      .filter(o => o.tecnico_id && o.fecha_programada)
+      .forEach(o => {
+        const porTecnico = porFecha[o.fecha_programada] || (porFecha[o.fecha_programada] = {});
+        if (!porTecnico[o.tecnico_id]) {
+          const t = tecnicoPorId[o.tecnico_id];
+          porTecnico[o.tecnico_id] = {
+            tecnico_id: o.tecnico_id,
+            nombre: t ? `${t.nombre} ${t.apellidos}` : o.tecnico_id,
+            zona: t ? t.zona : null,
+            tipo: t ? t.tipo : null,
+            paradas: [],
+          };
+        }
+        porTecnico[o.tecnico_id].paradas.push({
+          ot_id: o.id,
+          tipo: o.tipo,
+          direccion: o.comuna ? `${o.direccion_instalacion}, ${o.comuna}` : o.direccion_instalacion,
+          hora_programada: o.hora_programada,
+        });
+      });
+    const resultado = {};
+    Object.entries(porFecha).forEach(([fecha, porTecnico]) => {
+      // No hay un "orden de ruta" guardado en este backend — se muestran
+      // ordenadas por hora programada, nada más (esto es solo lectura).
+      Object.values(porTecnico).forEach(r => r.paradas.sort((a, b) => (a.hora_programada || "").localeCompare(b.hora_programada || "")));
+      resultado[fecha] = Object.values(porTecnico);
+    });
+    return resultado;
+  }
+
   async function obtenerRutasRegistradas(fecha) {
-    return fetchJSON(`${API_BASE_URL}/rutas?fecha=${encodeURIComponent(fecha)}`);
+    const porFecha = await agruparAsignacionesConfirmadas();
+    return porFecha[fecha] || [];
+  }
+
+  // Todas las fechas con algo confirmado de una vez — { "2026-10-05": [...
+  // rutas], "2026-10-06": [...] } — para que el banner "Rutas confirmadas"
+  // de CADA día que corresponda reaparezca al abrir la pantalla, no solo
+  // el de la fecha que esté elegida en el selector en ese momento.
+  async function obtenerAsignacionesConfirmadasPorFecha() {
+    return agruparAsignacionesConfirmadas();
   }
 
   // Trazado real por calle de una ruta (OSRM), para dibujarla en el mapa
@@ -315,7 +411,7 @@
   window.RUTAS_EXTERNO_API = {
     API_BASE_URL, hoyISO, sumarDiasISO, fetchJSON,
     obtenerTecnicos, obtenerOtsPorAsignar,
-    ejecutarOptimizacion, obtenerRutasRegistradas, obtenerGeometriaRuta,
+    ejecutarOptimizacion, obtenerRutasRegistradas, obtenerAsignacionesConfirmadasPorFecha, obtenerGeometriaRuta,
     obtenerCatalogoParametros, obtenerConfiguracion, guardarConfiguracion, restaurarConfiguracion,
     confirmarAsignaciones, patchTecnicoOt,
     // Compartidos para reconstruir objetos ot/técnico a partir de la

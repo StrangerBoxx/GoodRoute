@@ -228,6 +228,7 @@ a { color: inherit; text-decoration: none; }
 .btn-ghost:hover { background: var(--surface-3); color: var(--text); }
 .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 8px; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:focus-visible, .dev-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---- Cards ---- */
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -254,6 +255,11 @@ a { color: inherit; text-decoration: none; }
 .avatar.sm { width: 26px; height: 26px; font-size: 10.5px; }
 .avatar.md { width: 34px; height: 34px; font-size: 12.5px; }
 .avatar.lg { width: 46px; height: 46px; font-size: 16px; }
+/* Avatares en gris neutro en la propuesta de rutas (maestro/detalle): el
+   color saturado por técnico no codifica nada ahí y es lo primero que
+   atrapa el ojo — el azul corporativo queda reservado para la selección
+   y el número de parada. */
+.rx-tech-item .avatar, .rx-detail .avatar { background: var(--surface-3) !important; color: var(--text-2) !important; }
 
 /* ---- Tables ---- */
 .tbl { width: 100%; border-collapse: collapse; }
@@ -346,6 +352,12 @@ a { color: inherit; text-decoration: none; }
 .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 550; color: var(--text-2); margin-bottom: 14px; }
 .back-link:hover { color: var(--text); }
 .back-link svg { width: 14px; height: 14px; }
+/* Variante más llamativa para volver desde "Asignaciones registradas":
+   chip con color de acento en vez de texto gris, para que se note de
+   entrada que hay un camino de vuelta a "Asignar rutas". */
+.back-link-accent { color: var(--accent-strong); background: var(--accent-softer); font-size: 14px; font-weight: 650; padding: 10px 18px; border-radius: 22px; transition: background .12s, box-shadow .12s; }
+.back-link-accent:hover { background: var(--accent-soft); color: var(--accent-strong); box-shadow: var(--shadow-sm); }
+.back-link-accent svg { width: 17px; height: 17px; color: var(--accent); }
 .detail-num { font-size: 22px; font-weight: 660; letter-spacing: -.4px; font-family: var(--mono); }
 .readonly-banner { display: flex; align-items: center; gap: 10px; background: var(--slate-bg); border: 1px solid var(--border-2); color: var(--slate-fg); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 12.5px; font-weight: 500; margin-bottom: 18px; }
 .readonly-banner svg { width: 16px; height: 16px; flex: none; }
@@ -535,14 +547,51 @@ a { color: inherit; text-decoration: none; }
 .seg-toggle button:hover:not(.on) { color: var(--text); }
 
 /* ---- Confirmar rutas (tarjetas por técnico) ---- */
-.route-banner { display: flex; align-items: center; gap: 12px; background: var(--accent-softer); border: 1px solid var(--accent-soft); border-radius: var(--radius); padding: 14px 18px; font-size: 13px; color: var(--text-2); margin-bottom: 22px; }
-.route-banner svg { width: 20px; height: 20px; color: var(--accent); flex: none; }
-.route-banner b { color: var(--text); }
 /* Columnas CSS (no grid de filas) — cada tarjeta ocupa solo su propia
    altura, así una ruta corta ("Sin OTs asignadas") no deja un hueco vacío
    esperando a la tarjeta más alta de su misma fila. */
 .routes-grid { column-count: 2; column-gap: var(--gap); }
 @media (max-width: 1080px) { .routes-grid { column-count: 1; } }
+
+/* ---- Propuesta de rutas: maestro (técnicos) / detalle (ruta elegida) ----
+   Reemplaza la grilla de tarjetas: con 18+ OT visibles a la vez, cada
+   parada repetía hora/subir/bajar/mover/quitar en las ~N tarjetas a la
+   vez — acá solo se ve la ruta del técnico elegido en la lista de la
+   izquierda, así que los mismos controles pueden quedar siempre visibles
+   sin sumar ruido. */
+.rx-master-detail { display: flex; gap: var(--gap); align-items: flex-start; }
+@media (max-width: 1080px) { .rx-master-detail { flex-direction: column; } }
+.rx-tech-list { flex: 0 0 300px; width: 300px; display: flex; flex-direction: column; gap: 3px; padding: 8px; max-height: 640px; overflow-y: auto; }
+@media (max-width: 1080px) { .rx-tech-list { width: 100%; flex: none; max-height: 280px; } }
+.rx-tech-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 12px; border-radius: 9px; border-left: 3px solid transparent; background: transparent; transition: background .12s, border-color .12s; }
+.rx-tech-item:hover { background: var(--surface-2); }
+.rx-tech-item.active { background: var(--accent-softer); border-left-color: var(--accent); }
+.rx-tech-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rx-tech-item-name { flex: 1; min-width: 0; font-weight: 620; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rx-tech-item-sub { font-size: 11.5px; color: var(--text-3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rx-tech-item-count { font-size: 12.5px; font-weight: 700; color: var(--text-2); flex: none; }
+/* Marca discreta ("esta ruta ya no es la que entregó el optimizador") en
+   el ítem de la lista maestra — sin texto, a propósito: el detalle de
+   qué cambió va en el panel de la derecha (.rx-cambios-resumen). */
+.rx-tech-item-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+/* Línea de "qué cambió" en la cabecera del panel de detalle, en palabras
+   ("2 paradas reordenadas, 1 movida a otro técnico") — justifica que el
+   botón "Restablecer ruta" esté habilitado. */
+.rx-cambios-resumen { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-2); margin-top: 4px; }
+.rx-cambios-resumen svg { color: var(--amber-fg); flex: none; }
+.rx-detail { flex: 1; min-width: 0; margin-bottom: 0; }
+/* Con el botón "Restablecer ruta" sumado a avatar/nombre/badge/conteo, la
+   cabecera del panel de detalle puede quedar ajustada en una pantalla muy
+   angosta — que pase a la línea siguiente en vez de desbordar. Acotado a
+   este panel (no afecta .route-head en "Asignaciones registradas"). */
+.rx-detail .route-head { flex-wrap: wrap; row-gap: 8px; }
+/* Franja de métricas del panel de detalle: dato grande + etiqueta chica
+   debajo, siempre con al menos paradas/km/capacidad (nunca se ve vacía
+   aunque el técnico tenga una sola parada). */
+.rx-metrics { display: flex; flex-wrap: wrap; gap: 22px; background: var(--surface-2); padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.rx-metric { display: flex; flex-direction: column; gap: 2px; min-width: 60px; }
+.rx-metric-value { font-size: 17px; font-weight: 700; font-family: var(--mono); font-feature-settings: "tnum" 1; color: var(--text); }
+.rx-metric-label { font-size: 10.5px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase; color: var(--text-3); }
 .route-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; break-inside: avoid; margin-bottom: var(--gap); }
 .route-card.menu-open { overflow: visible; } /* deja que .move-menu se vea/scrollee completo, sin que el borde redondeado lo recorte */
 .route-card.modificada { border-color: var(--violet-dot); box-shadow: 0 0 0 1px var(--violet-dot); }
@@ -582,7 +631,7 @@ a { color: inherit; text-decoration: none; }
 .route-stop-cambiada { background: var(--amber-bg); }
 .stop-n { width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-strong); font-size: 11.5px; font-weight: 700; display: grid; place-items: center; flex: none; }
 .stop-cliente { font-weight: 600; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
-.stop-dir { font-size: 11.5px; color: var(--text-2); display: flex; align-items: center; gap: 5px; margin-top: 3px; }
+.stop-dir { font-size: 11.5px; color: var(--text-2); display: flex; align-items: center; gap: 5px; margin-top: 3px; flex-wrap: wrap; overflow-wrap: anywhere; }
 .stop-dir svg { color: var(--text-4); flex: none; }
 .stop-meta { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
 .route-foot { display: flex; gap: 9px; justify-content: space-between; padding: 13px 18px; border-top: 1px solid var(--border); background: var(--surface-2); }
@@ -591,6 +640,57 @@ a { color: inherit; text-decoration: none; }
 .move-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; width: 100%; text-align: left; }
 .move-item:hover { background: var(--surface-3); }
 .move-item .mi-name { font-size: 12.5px; font-weight: 600; }
+
+/* ---- Planificar rutas: tira de 7 días + calendario (reemplaza el
+   <input type="date"> suelto — la fecha es el contexto de toda la
+   pantalla, no un campo más del formulario) ---- */
+.rx-tira-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.rx-tira-nav { display: flex; align-items: center; gap: 8px; flex: none; }
+.rx-tira-nav-btn { width: 30px; height: 30px; border-radius: var(--radius-sm); display: grid; place-items: center; color: var(--text-2); border: 1px solid var(--border-2); background: var(--surface); transition: background .12s; }
+.rx-tira-nav-btn:hover:not(:disabled) { background: var(--surface-2); }
+.rx-tira-nav-btn:disabled { opacity: .35; cursor: not-allowed; }
+.rx-tira-nav-btn svg { width: 15px; height: 15px; }
+.rx-tira-mes { font-weight: 640; font-size: 14px; min-width: 230px; text-align: center; white-space: nowrap; }
+/* Resumen del día elegido (CAMBIO 3) — entre la navegación de semana y
+   los botones de Hoy/Ir a una fecha, en la misma cabecera de la tira. */
+.rx-tira-resumen { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 260px; min-width: 0; font-size: 13px; }
+.rx-tira-acciones { display: flex; align-items: center; gap: 8px; flex: none; }
+.rx-tira-dias { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+
+.dia-card { flex: 1 1 0; min-width: 72px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 6px 9px; border-radius: var(--radius-sm); border: 1.5px solid var(--border); background: var(--surface); position: relative; cursor: pointer; transition: border-color .12s, background .12s, box-shadow .12s, opacity .12s; }
+.dia-card:hover:not(:disabled) { background: var(--surface-2); }
+.dia-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dia-card.selected { border-color: var(--accent); background: var(--accent-softer); box-shadow: 0 0 0 3px var(--accent-softer); }
+.dia-card.sin-ot { opacity: .55; }
+.dia-card:disabled { opacity: .3; cursor: not-allowed; }
+.dia-card-hoy { position: absolute; top: 4px; right: 4px; font-size: 8.5px; font-weight: 700; letter-spacing: .3px; color: var(--accent-strong); background: var(--accent-soft); padding: 1px 5px; border-radius: 6px; }
+.dia-card-dow { font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--text-3); }
+.dia-card-num { font-size: 19px; font-weight: 700; color: var(--text-2); }
+.dia-card.selected .dia-card-num { color: var(--accent-strong); }
+.dia-card-estado { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--text-3); white-space: nowrap; }
+
+.dia-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.dia-dot-verde { background: var(--green-fg); }
+.dia-dot-ambar { background: var(--amber-fg); }
+
+/* Calendario emergente ("Ir a una fecha") */
+.rx-calendario { position: absolute; top: calc(100% + 8px); right: 0; z-index: 90; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-pop); padding: 14px; width: 300px; animation: ddIn .14s ease; }
+.rx-calendario-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.rx-calendario-mes { font-weight: 640; font-size: 13.5px; }
+.rx-calendario-dow { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 4px; }
+.rx-calendario-dow span { text-align: center; font-size: 10.5px; font-weight: 700; color: var(--text-3); }
+.rx-calendario-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.rx-calendario-dia { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0 7px; border-radius: var(--radius-sm); font-size: 12.5px; color: var(--text-2); background: transparent; transition: background .12s; }
+.rx-calendario-dia:hover:not(:disabled) { background: var(--surface-2); }
+.rx-calendario-dia:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rx-calendario-dia:disabled { opacity: .3; cursor: not-allowed; }
+.rx-calendario-dia.fuera-de-mes { color: var(--text-4); }
+.rx-calendario-dia.hoy { box-shadow: inset 0 0 0 1.5px var(--accent-strong); }
+.rx-calendario-dia.selected { background: var(--accent); color: var(--on-accent); }
+.rx-calendario-dia .dia-dot { margin-top: 1px; }
+.rx-calendario-leyenda { display: flex; gap: 16px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--text-3); }
+.rx-calendario-leyenda span { display: flex; align-items: center; gap: 6px; }
+
 
 /* ---- Asignación de rutas: selección + edición de propuesta (HU-01/02/03) ---- */
 .rx-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--gap); align-items: start; margin-bottom: 18px; }

@@ -184,15 +184,15 @@ function App() {
   else if (route.screen === "tech") { const tt = CP_DATA.techById[route.params.id]; content = <TechDetail t={tt} go={go} />; }
   else if (route.screen === "techNew") content = <TechForm tech={null} go={go} />;
   else if (route.screen === "installations") content = <Installations go={go} onViewEvidence={(id) => setEvidenceOT(id)} />;
-  else if (route.screen === "settings") content = <Settings initialSection={route.params.section} />;
+  else if (route.screen === "settings") content = <Settings />;
   else if (route.screen === "profile") content = <Profile go={go} />;
-  else if (route.screen === "rutasExterno") content = <RutasExternoScreen onToast={setToast} go={go} />;
+  else if (route.screen === "rutasExterno") content = <RutasExternoScreen onToast={setToast} go={go} route={route} />;
   else if (route.screen === "rutasExternoRegistro") content = <RegistroAsignacionesScreen go={go} />;
   else if (route.screen === "analisis") content = <DashboardAnalisisScreen />;
 
   if (!authed) {
     if (authView === "forgot") return <ForgotPassword onBack={() => setAuthView("login")} />;
-    return <Login onLogin={() => { setAuthed(true); setRoute({ screen: "dashboard", params: {} }); }} onForgot={() => setAuthView("forgot")} />;
+    return <Login onLogin={() => { setAuthed(true); setRoute({ screen: "rutasExterno", params: {} }); }} onForgot={() => setAuthView("forgot")} />;
   }
 
   return (
