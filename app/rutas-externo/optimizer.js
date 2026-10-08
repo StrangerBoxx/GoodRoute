@@ -22,7 +22,16 @@
     return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
   }
   function minutosViaje(km) { return (km / VELOCIDAD_KMH) * 60; }
-  function hhmmAMin(hhmm) { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; }
+  // null si no hay dato (no tira "hhmm.split no es función") — pasa con
+  // paradas reconstruidas desde el historial de confirmaciones del
+  // backend (ver RutasExterno.jsx, el useEffect que rehidrata
+  // `confirmados` con obtenerAsignacionesConfirmadasPorFecha): ese
+  // registro no trae ventana horaria, solo hora programada.
+  function hhmmAMin(hhmm) {
+    if (!hhmm) return null;
+    const [h, m] = hhmm.split(":").map(Number);
+    return h * 60 + m;
+  }
   function minAHhmm(min) {
     const m = Math.max(0, Math.round(min));
     const h = Math.floor(m / 60) % 24;
@@ -30,12 +39,16 @@
   }
 
   /* ¿A qué hora llegaría `tecnico` (parado en `desde`, libre en `clockMin`) a `ot`,
-     y es factible (cae dentro de su ventana)? */
+     y es factible (cae dentro de su ventana)? Sin ventana conocida (ver
+     hhmmAMin) no hay con qué evaluar feasibilidad — se asume factible en
+     vez de bloquear toda la validación por un dato que no está. */
   function evaluarLlegada(desde, clockMin, ot) {
     const dist = haversineKm(desde, ot);
+    const inicioMin = hhmmAMin(ot.ventanaInicio);
+    const finMin = hhmmAMin(ot.ventanaFin);
     const llegadaBruta = clockMin + minutosViaje(dist);
-    const llegada = Math.max(llegadaBruta, hhmmAMin(ot.ventanaInicio));
-    const factible = llegada <= hhmmAMin(ot.ventanaFin);
+    const llegada = inicioMin != null ? Math.max(llegadaBruta, inicioMin) : llegadaBruta;
+    const factible = finMin != null ? llegada <= finMin : true;
     return { dist, llegada, factible };
   }
 

@@ -134,13 +134,16 @@ function Toast({ msg, onDone }) {
 }
 
 /* ---- Overlay de carga a pantalla completa — para operaciones que
-   bloquean la pantalla mientras esperan al backend (optimizar, guardar,
-   confirmar), no solo el ícono del botón que la dispara. ---- */
+   bloquean la pantalla mientras esperan al backend (guardar, confirmar),
+   no solo el ícono del botón que la dispara. ("Optimizar planificación"
+   en Asignar rutas usa su propio panel de pasos en vez de esto, ver
+   PanelOptimizando en RutasExterno.jsx — ahí sí interesa mostrar avance,
+   acá es una espera más corta y genérica.) ---- */
 function CargandoOverlay({ mensaje }) {
   return (
     <div className="overlay">
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
-        <span className="icon-spin" style={{ color: "var(--accent)" }}><Icon name="refresh" style={{ width: 40, height: 40 }} /></span>
+        <span className="rx-ring rx-ring-40 rx-ring-accent" aria-hidden="true" />
         {mensaje && <div style={{ color: "#fff", fontWeight: 600 }}>{mensaje}</div>}
       </div>
     </div>

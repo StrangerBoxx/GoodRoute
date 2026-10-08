@@ -160,7 +160,7 @@ function ConfiguracionOptimizador() {
       <div className="row-flex" style={{ justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
         <div className="cell-muted" style={{ fontSize: 12.5, maxWidth: 440 }}>Reglas de la operación que usa el optimizador al armar rutas — jornada, capacidad, duración de servicios y sectores.</div>
         <button className="btn btn-sm" disabled={restaurando} onClick={onRestaurar} style={{ flex: "none" }}>
-          <span className={restaurando ? "icon-spin" : ""}><Icon name="refresh" /></span>{restaurando ? "Restaurando…" : "Restaurar valores por defecto"}
+          {restaurando ? <span className="rx-ring" aria-hidden="true" /> : <Icon name="refresh" />}{restaurando ? "Restaurando…" : "Restaurar valores por defecto"}
         </button>
       </div>
 
@@ -193,7 +193,7 @@ function ConfiguracionOptimizador() {
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
             <button className="btn btn-sm" onClick={onDescartar} disabled={guardando}>Descartar</button>
             <button className="btn btn-primary btn-sm" onClick={onGuardar} disabled={guardando}>
-              {guardando ? <span className="icon-spin"><Icon name="refresh" /></span> : <Icon name="check" />}{guardando ? "Guardando…" : "Guardar cambios"}
+              {guardando ? <span className="rx-ring" aria-hidden="true" /> : <Icon name="check" />}{guardando ? "Guardando…" : "Guardar cambios"}
             </button>
           </div>
         </div>

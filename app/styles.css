@@ -398,7 +398,8 @@ a { color: inherit; text-decoration: none; }
 .link-mini:hover { color: var(--accent-strong); }
 .link-mini svg { width: 12px; height: 12px; }
 .dev-remove { color: var(--text-4); width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; }
-.dev-remove:hover { background: var(--red-bg); color: var(--red-fg); }
+.dev-remove:hover:not(:disabled) { background: var(--red-bg); color: var(--red-fg); }
+.dev-remove:disabled { opacity: .4; cursor: not-allowed; }
 .add-dev { display: inline-flex; align-items: center; gap: 7px; margin: 12px 18px; padding: 7px 13px; border: 1px solid var(--border-2); border-radius: 9px; color: var(--accent); font-weight: 600; font-size: 12.5px; background: var(--surface); transition: background .12s, border-color .12s; }
 .add-dev:hover { background: var(--accent-softer); border-color: var(--accent); }
 .add-dev svg { width: 16px; height: 16px; }
@@ -457,7 +458,81 @@ a { color: inherit; text-decoration: none; }
 
 /* ---- Loading affordances ---- */
 .icon-spin { display: inline-flex; animation: spin .9s linear infinite; }
+/* El margen que separa el ícono del texto (ej. .empty svg) tiene que ir
+   en el contenedor que gira, no en el svg de adentro — si el svg conserva
+   su propio margin-bottom, la caja de .icon-spin deja de ser cuadrada
+   (el margen de un hijo en flex suma a la altura del contenedor) y el
+   centro de rotación queda corrido hacia arriba: en vez de girar prolijo
+   en su lugar, el ícono bambolea. */
+.icon-spin svg { margin: 0; }
+.empty .icon-spin { margin-bottom: 10px; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Anillo de espera — reemplaza el ícono de "recargar" girando en todo
+   Planificar rutas (y los lugares que comparten su mismo componente de
+   carga, CargandoOverlay): un aro simple, sin flechas ni puntas que el
+   ojo pueda seguir mientras gira, por eso se lee tranquilo. El color lo
+   pone currentColor — hereda el color de texto de donde esté metido
+   (un botón, una línea gris, el título del panel), así que no hace falta
+   fijarlo acá salvo cuando se pide explícitamente en var(--accent). */
+.rx-ring { display: inline-block; flex: none; width: 15px; height: 15px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; animation: rxGiro .7s linear infinite; }
+.rx-ring-11 { width: 11px; height: 11px; border-width: 1.5px; }
+.rx-ring-14 { width: 14px; height: 14px; }
+.rx-ring-16 { width: 16px; height: 16px; }
+.rx-ring-18 { width: 18px; height: 18px; }
+.rx-ring-20 { width: 20px; height: 20px; }
+.rx-ring-40 { width: 40px; height: 40px; border-width: 3px; }
+.rx-ring-accent { color: var(--accent); }
+@keyframes rxGiro { to { transform: rotate(360deg); } }
+/* El avance de los pasos ya se entiende por la marca (punto/aro/check) y
+   el color del texto, nunca solo por la animación — así que atenuar y
+   congelar el aro acá no le saca información a nadie. */
+@media (prefers-reduced-motion: reduce) {
+  .rx-ring { animation: none; opacity: .5; }
+}
+
+/* Texto solo para lectores de pantalla — visualmente oculto, pero sigue
+   en el flujo de accesibilidad (lo contrario de aria-hidden). */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* ---- Panel de pasos "Optimizando planificación" ----
+   Reemplaza el velo oscuro + ícono girando de antes: fondo ACLARADO (el
+   propio color de superficie, semitransparente) en vez de oscurecido, y
+   una tarjeta con la lista de pasos en vez de un giro indefinido sin
+   avisar cuánto falta. */
+.rx-panel-velo {
+  position: fixed; inset: 0; z-index: 100;
+  display: grid; place-items: center; padding: 24px;
+  /* "rgba del fondo al 78% + blur": con una sola variable de color (sin
+     un triplete r,g,b aparte) color-mix es la forma correcta de pedirle
+     al navegador "var(--surface) al 78%, el resto transparente" — sigue
+     reaccionando en vivo si el panel de temas cambia --surface, que una
+     rgba() con un hex pegado a mano no podría. */
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  backdrop-filter: blur(1.5px);
+}
+.rx-panel-pasos { width: 340px; max-width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-pop); padding: 20px 22px; outline: none; animation: rise .18s cubic-bezier(.2,.7,.3,1); }
+.rx-panel-pasos-head { display: flex; align-items: center; gap: 10px; }
+.rx-panel-pasos-titulo { font-size: 15px; font-weight: 640; color: var(--text); }
+.rx-panel-pasos-contexto { margin: 6px 0 16px; font-size: 12.5px; color: var(--text-3); }
+
+.rx-pasos-lista { display: flex; flex-direction: column; gap: 11px; list-style: none; padding: 0; margin: 0; }
+.rx-paso { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+/* Ancho fijo en los tres estados — punto chico, aro o check NO tienen el
+   mismo tamaño entre sí, así que sin este ancho fijo el texto se corre
+   unos píxeles cada vez que un paso cambia de estado. */
+.rx-paso-marca { width: 18px; flex: none; display: flex; align-items: center; justify-content: center; }
+.rx-paso-punto { width: 7px; height: 7px; border-radius: 50%; background: var(--text-4); }
+.rx-paso-pendiente .rx-paso-texto { color: var(--text-4); }
+.rx-paso-activo .rx-paso-texto { color: var(--text); font-weight: 550; }
+.rx-paso-activo .rx-paso-marca { color: var(--accent); }
+.rx-paso-completado .rx-paso-texto { color: var(--text-3); }
+.rx-paso-completado .rx-paso-marca svg { color: var(--green-fg); }
+
+.rx-panel-pasos-error { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text); }
+.rx-panel-pasos-error-msg { display: flex; align-items: flex-start; gap: 7px; }
+.rx-panel-pasos-error-msg svg { flex: none; margin-top: 1px; color: var(--text-3); }
+.rx-panel-pasos-error-acciones { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .skel { animation: pulse 1.6s infinite; }
 
 /* ---- Indicator cards (dashboard de análisis) ---- */
@@ -567,13 +642,24 @@ a { color: inherit; text-decoration: none; }
 .rx-tech-item:hover { background: var(--surface-2); }
 .rx-tech-item.active { background: var(--accent-softer); border-left-color: var(--accent); }
 .rx-tech-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.rx-tech-item-name { flex: 1; min-width: 0; font-weight: 620; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rx-tech-item-name { min-width: 0; font-weight: 620; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rx-tech-item-sub { font-size: 11.5px; color: var(--text-3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* El número de OT y, si corresponde, la marca de "modificada" van juntos
+   al final de la fila — centrados entre sí (align-items: center), así se
+   leen como un solo dato ("N OT, y cambiaron") en vez de dos elementos
+   sueltos a distinta altura. */
+.rx-tech-item-count-wrap { display: flex; align-items: center; gap: 5px; flex: none; }
 .rx-tech-item-count { font-size: 12.5px; font-weight: 700; color: var(--text-2); flex: none; }
 /* Marca discreta ("esta ruta ya no es la que entregó el optimizador") en
    el ítem de la lista maestra — sin texto, a propósito: el detalle de
-   qué cambió va en el panel de la derecha (.rx-cambios-resumen). */
-.rx-tech-item-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+   qué cambió va en el panel de la derecha (.rx-cambios-resumen). Va junto
+   al número de OT (no al nombre): es el dato que explica por qué ese
+   número ya no es el original. */
+/* Ámbar, no azul: el azul ya está tomado por "seleccionado" en esta misma
+   lista (.rx-tech-item.active) — usar el mismo color para "modificada"
+   los confundiría. Ámbar es el color que ya usa el resto de la pantalla
+   para "esto se editó" (badge "Editada", rx-cambios-resumen, etc.). */
+.rx-tech-item-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber-fg); flex: none; }
 /* Línea de "qué cambió" en la cabecera del panel de detalle, en palabras
    ("2 paradas reordenadas, 1 movida a otro técnico") — justifica que el
    botón "Restablecer ruta" esté habilitado. */
@@ -635,11 +721,27 @@ a { color: inherit; text-decoration: none; }
 .stop-dir svg { color: var(--text-4); flex: none; }
 .stop-meta { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
 .route-foot { display: flex; gap: 9px; justify-content: space-between; padding: 13px 18px; border-top: 1px solid var(--border); background: var(--surface-2); }
-.move-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 80; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-pop); min-width: 210px; padding: 6px; max-height: 280px; overflow-y: auto; animation: ddIn .14s ease; }
+/* min-width/max-height más grandes que antes (210px/280px) — con el
+   "Ver detalle" de cada técnico, el contenido necesita un poco más de
+   aire para no sentirse apretado. */
+.move-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 80; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-pop); min-width: 270px; padding: 6px; max-height: 380px; overflow-y: auto; animation: ddIn .14s ease; }
 .move-menu-h { font-size: 10.5px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; color: var(--text-3); padding: 7px 10px 5px; }
+.move-item-row { border-radius: 8px; }
+.move-item-row:hover { background: var(--surface-3); }
 .move-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; width: 100%; text-align: left; }
-.move-item:hover { background: var(--surface-3); }
 .move-item .mi-name { font-size: 12.5px; font-weight: 600; }
+/* "Ver detalle" — alineado bajo el bloque de texto del técnico (mismo
+   sangrado que mi-name/mi-zone: ancho del avatar + su gap), nunca
+   dispara la asignación (ver stopPropagation en RxMoveMenu). */
+.mi-ver-detalle { display: flex; align-items: center; gap: 3px; margin: 0 10px 6px 42px; font-size: 11px; font-weight: 600; color: var(--accent); }
+.mi-ver-detalle:hover { text-decoration: underline; }
+.mi-detalle { margin: 0 10px 8px 42px; padding: 7px 9px; background: var(--surface-2); border-radius: 7px; display: flex; flex-direction: column; gap: 5px; max-height: 140px; overflow-y: auto; }
+.mi-detalle li { display: flex; align-items: baseline; gap: 6px; font-size: 11px; list-style: none; }
+/* flex: 1 1 auto + min-width: 0 (no alcanza solo con white-space/ellipsis
+   en un hijo flex) para que la dirección se trunque y deje lugar fijo a
+   la hora, en vez de empujarla fuera de la fila. */
+.mi-detalle-dir { flex: 1 1 auto; min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mi-detalle-hora { flex: none; color: var(--text-3); }
 
 /* ---- Planificar rutas: tira de 7 días + calendario (reemplaza el
    <input type="date"> suelto — la fecha es el contexto de toda la
@@ -667,7 +769,11 @@ a { color: inherit; text-decoration: none; }
 .dia-card-dow { font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--text-3); }
 .dia-card-num { font-size: 19px; font-weight: 700; color: var(--text-2); }
 .dia-card.selected .dia-card-num { color: var(--accent-strong); }
-.dia-card-estado { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--text-3); white-space: nowrap; }
+/* Columna, no fila: un día puede tener confirmadas Y por asignar a la
+   vez (ej. 13 confirmadas, 5 por asignar) — cada una en su propia línea
+   con su propio punto, en vez de que una tape a la otra. */
+.dia-card-estado { display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 10px; color: var(--text-3); }
+.dia-card-estado-linea { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 
 .dia-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
 .dia-dot-verde { background: var(--green-fg); }
@@ -687,7 +793,7 @@ a { color: inherit; text-decoration: none; }
 .rx-calendario-dia.fuera-de-mes { color: var(--text-4); }
 .rx-calendario-dia.hoy { box-shadow: inset 0 0 0 1.5px var(--accent-strong); }
 .rx-calendario-dia.selected { background: var(--accent); color: var(--on-accent); }
-.rx-calendario-dia .dia-dot { margin-top: 1px; }
+.rx-calendario-dia-dots { display: flex; align-items: center; gap: 3px; margin-top: 1px; }
 .rx-calendario-leyenda { display: flex; gap: 16px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--text-3); }
 .rx-calendario-leyenda span { display: flex; align-items: center; gap: 6px; }
 
@@ -708,6 +814,11 @@ a { color: inherit; text-decoration: none; }
 .rx-error-tecnico.saliendo { opacity: 0; transform: translateY(-3px); }
 .rx-stop-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 .move-item .mi-zone { font-size: 11px; color: var(--text-3); }
+/* Carga actual del técnico dentro del menú "Asignar a…" — en gris si está
+   libre, en ámbar (el mismo tono que ya usa la pantalla para "atención")
+   si ya tiene OT encima, para que se note sin tener que leer el número. */
+.mi-carga { font-size: 10.5px; color: var(--text-3); margin-top: 1px; }
+.mi-carga-con-ots { color: var(--amber-fg); font-weight: 600; }
 
 /* ---- Disponibilidad semanal (Técnicos) ---- */
 .dispo-tbl { width: 100%; border-collapse: collapse; }
