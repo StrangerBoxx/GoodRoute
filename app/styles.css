@@ -540,7 +540,13 @@ a { color: inherit; text-decoration: none; }
 .ind-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 15px 12px; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
 .ind-card:hover { border-color: var(--border-3); }
 .ind-card.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-softer); }
-.ind-pop { position: absolute; z-index: 50; top: 26px; left: -8px; width: 320px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-pop); padding: 16px; }
+/* Sigla de KPI (HU-27): identificador corto, visible en tarjeta, gráfico y popover */
+.kpi-sigla { display: inline-flex; align-items: center; flex: none; font-size: 10.5px; font-weight: 700; letter-spacing: .4px; padding: 1px 6px; border-radius: 5px; background: var(--surface-3); color: var(--text-2); line-height: 1.5; }
+.ind-pop { position: absolute; z-index: 50; top: 26px; left: -8px; width: min(280px, calc(100vw - 32px)); transform: translateX(var(--pop-dx, 0)); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-pop); padding: 14px 16px; }
+/* En celular: fijo abajo, a lo ancho, para que nunca quede cortado */
+@media (max-width: 600px) {
+  .ind-pop { position: fixed; top: auto; left: 16px; right: 16px; bottom: 16px; width: auto; transform: none; z-index: 120; }
+}
 
 /* misc */
 .row-flex { display: flex; align-items: center; gap: 10px; }
@@ -707,6 +713,10 @@ a { color: inherit; text-decoration: none; }
    de paradas numeradas, para que se note el sentido del recorrido */
 .map-pin.map-pin-start { background: #15803d; }
 .map-pin.map-pin-end { background: #b91c1c; width: 26px; height: 26px; font-size: 13px; }
+/* Leyenda bajo el mapa (HU-23) — reusa .map-pin en chico */
+.mapa-leyenda { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 11.5px; color: var(--text-3); }
+.mapa-leyenda span { display: inline-flex; align-items: center; gap: 6px; }
+.mapa-leyenda .map-pin { width: 16px; height: 16px; font-size: 9px; font-style: normal; border-width: 1.5px; box-shadow: none; }
 .route-stops { padding: 6px 0; }
 .route-stop { display: flex; align-items: center; gap: 12px; padding: 11px 18px; border-bottom: 1px solid var(--border); }
 .route-stop:last-child { border-bottom: none; }
@@ -721,10 +731,10 @@ a { color: inherit; text-decoration: none; }
 .stop-dir svg { color: var(--text-4); flex: none; }
 .stop-meta { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
 .route-foot { display: flex; gap: 9px; justify-content: space-between; padding: 13px 18px; border-top: 1px solid var(--border); background: var(--surface-2); }
-/* min-width/max-height más grandes que antes (210px/280px) — con el
-   "Ver detalle" de cada técnico, el contenido necesita un poco más de
-   aire para no sentirse apretado. */
-.move-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 80; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-pop); min-width: 270px; padding: 6px; max-height: 380px; overflow-y: auto; animation: ddIn .14s ease; }
+/* Ancho fijo (el del detalle desplegado): así abrir/cerrar "Ver detalle" de
+   un técnico no agranda ni achica el menú. Las direcciones largas se cortan
+   con "…" (ver .mi-detalle-dir). */
+.move-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 80; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-pop); width: 380px; max-width: calc(100vw - 32px); padding: 6px; max-height: 380px; overflow-y: auto; animation: ddIn .14s ease; }
 .move-menu-h { font-size: 10.5px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; color: var(--text-3); padding: 7px 10px 5px; }
 .move-item-row { border-radius: 8px; }
 .move-item-row:hover { background: var(--surface-3); }
@@ -757,6 +767,11 @@ a { color: inherit; text-decoration: none; }
    los botones de Hoy/Ir a una fecha, en la misma cabecera de la tira. */
 .rx-tira-resumen { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 260px; min-width: 0; font-size: 13px; }
 .rx-tira-acciones { display: flex; align-items: center; gap: 8px; flex: none; }
+/* Encabezado de la verificación (HU-31): "<" + día destacado + datos de la corrida */
+.rx-verif-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+.rx-verif-volver { flex: none; margin-top: 2px; }
+.rx-verif-dia { font-size: 20px; font-weight: 650; letter-spacing: -.3px; line-height: 1.3; }
+.rx-verif-dia::first-letter { text-transform: uppercase; }
 .rx-tira-dias { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
 
 .dia-card { flex: 1 1 0; min-width: 72px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 6px 9px; border-radius: var(--radius-sm); border: 1.5px solid var(--border); background: var(--surface); position: relative; cursor: pointer; transition: border-color .12s, background .12s, box-shadow .12s, opacity .12s; }
@@ -813,6 +828,20 @@ a { color: inherit; text-decoration: none; }
 .rx-error-tecnico { opacity: 1; transition: opacity .3s ease, transform .3s ease; }
 .rx-error-tecnico.saliendo { opacity: 0; transform: translateY(-3px); }
 .rx-stop-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+/* HU-23: las acciones de cada parada (subir/bajar/mover/quitar) quedan
+   atenuadas hasta pasar el mouse o enfocar la fila, para que la lista se
+   lea primero como ruta y no como botonera. En pantallas táctiles (sin
+   hover) se muestran siempre igual. */
+@media (hover: hover) {
+  .route-stop .rx-stop-actions { opacity: .3; transition: opacity .12s; }
+  .route-stop:hover .rx-stop-actions, .route-stop:focus-within .rx-stop-actions, .rx-stop-actions:has(.move-menu) { opacity: 1; }
+}
+/* HU-23: panel Pendientes distinguible del resto cuando quedan OT sin asignar */
+.rx-pendientes.con-pendientes { border-color: var(--amber-dot); box-shadow: inset 3px 0 0 var(--amber-dot); }
+.rx-pendientes-chip { cursor: pointer; }
+.rx-pendientes-chip:hover { filter: brightness(.97); }
+.rx-link-btn { font-size: 11.5px; font-weight: 600; color: var(--accent); padding: 2px 0; margin-top: 3px; }
+.rx-link-btn:hover { text-decoration: underline; }
 .move-item .mi-zone { font-size: 11px; color: var(--text-3); }
 /* Carga actual del técnico dentro del menú "Asignar a…" — en gris si está
    libre, en ámbar (el mismo tono que ya usa la pantalla para "atención")

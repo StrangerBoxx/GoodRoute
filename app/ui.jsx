@@ -135,7 +135,7 @@ function Toast({ msg, onDone }) {
 
 /* ---- Overlay de carga a pantalla completa — para operaciones que
    bloquean la pantalla mientras esperan al backend (guardar, confirmar),
-   no solo el ícono del botón que la dispara. ("Optimizar planificación"
+   no solo el ícono del botón que la dispara. ("Planificar Jornada"
    en Asignar rutas usa su propio panel de pasos en vez de esto, ver
    PanelOptimizando en RutasExterno.jsx — ahí sí interesa mostrar avance,
    acá es una espera más corta y genérica.) ---- */

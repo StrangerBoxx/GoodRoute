@@ -24,11 +24,12 @@ const {
 } = Recharts;
 
 /* ==========================================================================
-   1. INTERRUPTOR DE HONESTIDAD DEL DATO
-   Al conectar el backend, poner en true: el aviso "Datos simulados" desaparece
-   de toda la aplicación sin tocar ninguna otra línea.
+   1. ORIGEN DEL DATO
+   Todos los indicadores del catálogo son los 8 KPI del sprint (HU-24) y
+   salen de GoodRoute (GET /api/kpis/rango, sección 4b). Los que no tenían
+   fuente real (CVH, KMT, UTJ, TIV, KMA) se sacaron del catálogo el
+   28/10/2026; si vuelven, tienen que venir con datos reales.
    ========================================================================== */
-const USANDO_DATOS_REALES = false;
 
 /* ==========================================================================
    2. CATÁLOGO DE INDICADORES  —  ÚNICO PUNTO DE EDICIÓN
@@ -38,6 +39,8 @@ const USANDO_DATOS_REALES = false;
 
    Campos:
      id            clave estable, usada por el adaptador de datos
+     sigla         identificador corto visible en tarjeta, gráfico y popover
+                   (HU-27) — el supervisor reconoce el KPI por su sigla
      nombre        rótulo visible
      definicion    qué mide, en palabras del supervisor (se muestra en el popover)
      formula       cómo se calcula (se muestra en el popover)
@@ -54,145 +57,92 @@ const USANDO_DATOS_REALES = false;
                    componente nunca decide el tipo mirando el id: agregar un
                    indicador nuevo con su "grafico" alcanza para que se vea
                    bien, sin tocar GraficoPrincipal ni ningún otro componente.
-     sim           parámetros del generador de datos simulados
    ========================================================================== */
 const INDICADORES = [
   // ---- Operación ----
   {
     id: "ot_asignadas",
+    sigla: "OTA",
     nombre: "OT asignadas",
-    definicion: "Cantidad de órdenes de trabajo asignadas en el período.",
-    formula: "conteo de OT con técnico asignado",
-    fuente: "Backoffice: ID OT, fecha, técnico asignado, estado de OT, hora de asignación.",
+    definicion: "Cantidad de OT que quedaron asignadas a un técnico (sin contar las reprogramaciones).",
+    formula: "filas de asignación con técnico aceptado y sin motivo de reprogramación",
+    fuente: "GoodRoute (HU-24): tabla asignacion.",
     unidad: "OT", formato: "ot", direccion: "contexto", granularidad: "tecnico",
     grupo: "operacion", grafico: "barras_verticales",
-    sim: { base: 34, ruido: 0.19, tendencia: 0.13, finde: 0.24, min: 4, max: 62 },
   },
   {
     id: "ot_realizadas",
+    sigla: "OTX",
     nombre: "OT realizadas con éxito",
-    definicion: "Cantidad de OT que fueron ejecutadas y finalizadas correctamente.",
-    formula: "conteo de OT con estado final exitoso",
-    fuente: "Backoffice: ID OT, estado final, fecha de término, técnico, resultado de servicio.",
+    definicion: "Cantidad de OT ejecutadas y finalizadas correctamente (una OT parcial no cuenta).",
+    formula: "conteo de OT en estado finalizada",
+    fuente: "GoodRoute (HU-24): OT del sistema externo.",
     unidad: "OT", formato: "ot", direccion: "mas", granularidad: "tecnico",
     grupo: "operacion", grafico: "barras_verticales",
-    sim: { base: 29, ruido: 0.17, tendencia: 0.12, finde: 0.22, min: 2, max: 55 },
   },
   {
     id: "ot_pendientes",
+    sigla: "OTP",
     nombre: "OT pendientes",
-    definicion: "Cantidad de OT que permanecen pendientes al cierre del período.",
-    formula: "conteo de OT en estado pendiente al corte",
-    fuente: "Backoffice: ID OT, estado actual, fecha programada, técnico asignado o sin asignar.",
-    unidad: "OT", formato: "ot", direccion: "menos", granularidad: "tecnico",
-    grupo: "operacion", grafico: "linea",
-    sim: { base: 6, ruido: 0.35, tendencia: -0.15, finde: 0.6, min: 0, max: 20 },
+    definicion: "OT del día que, al terminar el día en hora de Chile, todavía no estaban finalizadas.",
+    formula: "conteo de OT del día no finalizadas al cierre del día",
+    fuente: "GoodRoute (HU-24): OT del sistema externo. No se calcula por técnico.",
+    unidad: "OT", formato: "ot", direccion: "menos", granularidad: "global",
+    grupo: "operacion", grafico: "barras_verticales",
   },
   {
     id: "ot_reprogramadas",
+    sigla: "OTR",
     nombre: "OT reprogramadas",
-    definicion: "Porcentaje de OT que debieron ser reprogramadas después de haber sido asignadas.",
-    formula: "OT reprogramadas / OT asignadas",
-    fuente: "Backoffice: ID OT, fecha original, fecha nueva, motivo de reprogramación, cantidad de reprogramaciones.",
-    unidad: "%", formato: "pct", direccion: "menos", granularidad: "tecnico",
-    grupo: "operacion", grafico: "linea",
-    sim: { base: 9, ruido: 0.3, tendencia: -0.12, finde: 1.3, min: 1, max: 28 },
-  },
-  {
-    id: "cumplimiento_ventana",
-    nombre: "Cumplimiento de ventana horaria",
-    definicion: "Porcentaje de servicios realizados dentro de la ventana horaria comprometida con el cliente.",
-    formula: "servicios dentro de ventana / servicios totales",
-    fuente: "Hora inicio ventana, hora término ventana, hora de llegada del técnico, ID OT, estado de la OT.",
-    unidad: "%", formato: "pct", direccion: "mas", granularidad: "tecnico",
-    grupo: "operacion", grafico: "linea_banda_min_max",
-    sim: { base: 82, ruido: 0.08, tendencia: 0.07, finde: 0.97, min: 55, max: 98 },
+    definicion: "Cantidad de OT que se reprogramaron después de haber sido asignadas.",
+    formula: "filas de asignación con motivo de reprogramación",
+    fuente: "GoodRoute (HU-24): tabla asignacion.",
+    unidad: "OT", formato: "ot", direccion: "menos", granularidad: "tecnico",
+    grupo: "operacion", grafico: "barras_verticales",
   },
 
   // ---- Uso de recursos ----
   {
-    id: "km_tecnico",
-    nombre: "Kilometraje por técnico",
-    definicion: "Distancia recorrida por cada técnico en el período.",
-    formula: "Σ km recorridos, agrupado por técnico",
-    fuente: "GPS del vehículo (RedGPS): técnico, ubicación inicial, ubicación final, distancia recorrida, fecha.",
-    unidad: "km", formato: "km", direccion: "menos", granularidad: "tecnico",
-    grupo: "recurso", grafico: "barras_horizontales_ranking",
-    sim: { base: 118, ruido: 0.14, tendencia: -0.09, finde: 0.38, min: 40, max: 210 },
-  },
-  {
     id: "tiempo_traslado",
+    sigla: "TTR",
     nombre: "Tiempo de traslado",
-    definicion: "Tiempo promedio de traslado entre una OT y la siguiente.",
-    formula: "promedio(hora de llegada siguiente OT − hora de término de la OT anterior)",
-    fuente: "Hora de término y ubicación de la OT anterior; hora de llegada y ubicación de la siguiente OT; técnico.",
+    definicion: "Tiempo promedio de traslado entre una OT y la siguiente del mismo técnico.",
+    formula: "promedio(documento de inicio de la OT siguiente − comprobante de la OT anterior)",
+    fuente: "GoodRoute (HU-24): documento de inicio y comprobantes de las OT.",
     unidad: "min", formato: "min", direccion: "menos", granularidad: "tecnico",
     grupo: "recurso", grafico: "linea_banda_min_max",
-    sim: { base: 22, ruido: 0.2, tendencia: -0.08, finde: 0.85, min: 8, max: 55 },
-  },
-  {
-    id: "utilizacion_jornada",
-    nombre: "Utilización de jornada",
-    definicion: "Porcentaje de la jornada disponible de un técnico utilizado en OT y desplazamientos planificados.",
-    formula: "(tiempo en OT + tiempo de traslado planificado) / duración de la jornada",
-    fuente: "Hora de inicio y término de jornada, duración de OT, tiempo de espera, técnico.",
-    unidad: "%", formato: "pct", direccion: "rango", objetivo: [75, 88],
-    granularidad: "tecnico", grupo: "recurso", grafico: "linea_banda_min_max",
-    sim: { base: 80, ruido: 0.09, tendencia: 0.09, finde: 0.96, min: 45, max: 97 },
   },
   {
     id: "tiempo_servicio",
+    sigla: "TPS",
     nombre: "Tiempo promedio de servicio",
     definicion: "Cuánto demora realmente un técnico desde que inicia hasta que termina una OT.",
-    formula: "promedio(hora de término de la OT − hora de inicio de la OT)",
-    fuente: "Hora de inicio y término de la OT, ID OT, tipo de servicio, técnico.",
+    formula: "promedio(comprobante de la OT − documento de inicio de la OT)",
+    fuente: "GoodRoute (HU-24): documento de inicio y comprobantes de las OT.",
     unidad: "min", formato: "min", direccion: "menos", granularidad: "tecnico",
     grupo: "recurso", grafico: "linea_banda_min_max",
-    sim: { base: 38, ruido: 0.18, tendencia: -0.05, finde: 1.1, min: 15, max: 90 },
   },
 
   // ---- Optimización ----
   {
     id: "tasa_aceptacion_rutas",
+    sigla: "TAR",
     nombre: "Tasa de aceptación de rutas",
-    definicion: "Porcentaje de rutas propuestas por el optimizador que Operaciones aceptó sin modificar.",
-    formula: "rutas no modificadas / rutas propuestas",
-    fuente: "Registro de modificaciones sobre rutas optimizadas: ID ruta, ruta propuesta, ruta modificada o no, fecha, usuario.",
-    unidad: "%", formato: "pct", direccion: "mas", granularidad: "global",
+    definicion: "Porcentaje de las propuestas del optimizador que la planificadora aceptó sin modificar. Las ediciones manuales no cuentan.",
+    formula: "propuestas del optimizador sin modificar / propuestas del optimizador",
+    fuente: "GoodRoute (HU-24): tabla asignacion.",
+    unidad: "%", formato: "pct", direccion: "mas", granularidad: "tecnico",
     grupo: "optimizacion", grafico: "linea",
-    sim: { base: 71, ruido: 0.11, tendencia: 0.16, finde: 0.94, min: 40, max: 96 },
-  },
-  {
-    id: "insercion_vivo",
-    nombre: "Tasa de inserción en vivo",
-    definicion:
-      "Porcentaje de OT nuevas que logran integrarse de forma factible en jornadas ya iniciadas, sin alterar los compromisos existentes de la ruta.",
-    formula: "OT_insertadas_factibles / OT_nuevas_solicitadas",
-    fuente: "ID OT nueva, hora de creación, técnico asignado, ruta existente, posibilidad de inserción, ruta modificada o no, resultado.",
-    unidad: "%", formato: "pct", direccion: "mas", granularidad: "global",
-    grupo: "optimizacion", grafico: "barras_apiladas_linea_secundaria",
-    sim: { base: 63, ruido: 0.17, tendencia: 0.21, finde: 0.7, min: 20, max: 92 },
-  },
-  {
-    id: "dist_optimizada",
-    nombre: "Reducción de distancia / km ahorrados",
-    definicion:
-      "Kilómetros ahorrados por la ruta optimizada respecto de la línea base (asignación manual o secuencial).",
-    formula: "km_baseline − km_optimizados",
-    fuente: "Km de planificación manual o base, km de la ruta optimizada, ID ruta, fecha. Línea base por acordar.",
-    unidad: "km", formato: "km", direccion: "mas", granularidad: "tecnico",
-    grupo: "optimizacion", grafico: "barras_verticales",
-    sim: { base: 96, ruido: 0.21, tendencia: 0.24, finde: 0.3, min: 15, max: 220 },
   },
   {
     id: "tiempo_planificacion",
+    sigla: "TPL",
     nombre: "Tiempo de planificación",
-    definicion: "Tiempo promedio que Operaciones demora en planificar o asignar una jornada.",
-    formula: "promedio(hora de término de planificación − hora de inicio de planificación)",
-    fuente: "Hora de inicio y término de planificación, fecha, usuario, cantidad de OT planificadas.",
+    definicion: "Tiempo promedio que Operaciones demora en planificar una jornada.",
+    formula: "promedio(fecha de asignación − inicio de la planificación)",
+    fuente: "GoodRoute (HU-24): tabla asignacion. No se calcula por técnico.",
     unidad: "min", formato: "min", direccion: "menos", granularidad: "global",
     grupo: "optimizacion",
-    sim: { base: 45, ruido: 0.22, tendencia: -0.2, finde: 0.5, min: 8, max: 95 },
   },
 ];
 
@@ -205,39 +155,30 @@ const GRUPOS = [
 /* ==========================================================================
    3. MAESTROS DE FILTRO
    --------------------------------------------------------------------------
-   El técnico y la zona salen del padrón real del backoffice (CP_DATA.tecnicos),
-   no de una lista aparte, para que el filtro muestre gente real del sistema.
+   Técnicos y zonas salen de GoodRoute (base.tecnicos, cargado en
+   useTablero), así los filtros muestran exactamente lo que existe en los
+   datos reales. No hay filtro por tipo de OT: /api/kpis no lo soporta.
    ========================================================================== */
-function tecnicoFactor(id) {
-  // Factor estable por técnico (0.8–1.3), para que la simulación no salte
-  // de un refresh a otro. Reemplaza al campo "f" de un padrón de prueba.
-  return 0.8 + mulberry32(hash(id))() * 0.5;
-}
-const ZONAS = [...new Set(CP_DATA.tecnicos.map((t) => t.zona))].sort();
-const TIPOS_OT = ["Instalación", "Mantención", "Retiro", "Revisión en terreno"];
+const zonasDe = (tecnicos) => [...new Set(tecnicos.map((t) => t.zona).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es"));
+const TIPO_OT_LABEL = window.RUTAS_EXTERNO_API.TIPO_OT_LABEL;
 
 /* ==========================================================================
    4. ADAPTADOR DE DATOS  —  ÚNICO PUNTO DE CONEXIÓN AL BACKEND
    --------------------------------------------------------------------------
    >>> PUNTO DE REEMPLAZO <<<
-   Cuando exista el backend, se reemplaza EL CUERPO de obtenerSerie() por un
-   fetch al endpoint histórico y se pone USANDO_DATOS_REALES = true. La firma y
-   la forma del objeto de retorno no cambian, así que ningún componente se toca.
+   Cada indicador se calcula en derivarKpiReal() (sección 4b, KPI de HU-24).
+   Para sumar uno nuevo: que GoodRoute lo entregue en /api/kpis/rango y
+   agregarlo al catálogo con esa sigla. La forma del objeto de retorno no
+   cambia, así que ningún componente se toca.
 
    Devuelve:
      {
        serie: [{
          iso, etiqueta, valor,        // siempre
          min, max,                    // sólo si ind.grafico === "linea_banda_min_max"
-         insertadas, rechazadas,      // sólo si ind.grafico === "barras_apiladas_linea_secundaria"
        }],
        anterior: [{ iso, etiqueta, valor }]   período inmediatamente previo
        porTecnico: [{ id, nombre, zona, tipo, valor }]   agregado del período completo (sin cambios)
-       porTecnicoDia: [{ id, nombre, zona, tipo, dias: [{ iso, etiqueta, valor }] }]
-                       opcional — sólo si ind.grafico === "barras_horizontales_ranking".
-                       Es el desglose día a día por técnico que ese gráfico
-                       necesita (porTecnico sólo trae un valor agregado para
-                       todo el período, no sirve para un ranking por día).
        vacio:    boolean  -> true cuando la combinación de filtros no tiene dato
        motivoVacio: string
      }
@@ -247,22 +188,10 @@ const TIPOS_OT = ["Instalación", "Mantención", "Retiro", "Revisión en terreno
    los campos que el "grafico" de cada indicador efectivamente usa.
    ========================================================================== */
 
-// Hoy fijo: el sistema opera sobre el lunes 1 de junio de 2026.
-const HOY = new Date(2026, 5, 1);
+// Hoy real (medianoche local): los datos reales de GoodRoute son de las
+// últimas semanas, así que el período por defecto termina hoy.
+const HOY = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
 
-function mulberry32(a) {
-  return function () {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-function hash(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return h >>> 0;
-}
 const iso = (d) => d.toISOString().slice(0, 10);
 const etiquetaFecha = (d) =>
   String(d.getDate()).padStart(2, "0") + "/" + String(d.getMonth() + 1).padStart(2, "0");
@@ -277,59 +206,7 @@ function diasDelRango(rango) {
   return dias;
 }
 
-function factorFiltros(filtros) {
-  let f = 1;
-  if (filtros.tecnico !== "todos") {
-    const t = CP_DATA.techById[filtros.tecnico];
-    if (t) f *= tecnicoFactor(t.id);
-  }
-  if (filtros.zona !== "todas") f *= 0.94 + (hash(filtros.zona) % 13) / 100;
-  if (filtros.tipoOT !== "todos") f *= 0.9 + (hash(filtros.tipoOT) % 21) / 100;
-  return f;
-}
-
-// Horizonte sobre el que se despliega la tendencia declarada en cada indicador.
-const HORIZONTE_DIAS = 180;
-
-function valorDelDia(ind, fecha, filtros) {
-  const s = ind.sim;
-  const semilla = hash(ind.id + "|" + iso(fecha) + "|" + filtros.zona + "|" + filtros.tipoOT);
-  const r = mulberry32(semilla)();
-  const dow = fecha.getDay();
-  const finde = dow === 0 || dow === 6;
-  // La deriva depende de la fecha real, no de la posición en la ventana: así el
-  // período anterior queda genuinamente antes en la tendencia.
-  const diasAtras = Math.min(HORIZONTE_DIAS, Math.max(0, (HOY - fecha) / 86400000));
-  const t = 1 - diasAtras / HORIZONTE_DIAS;
-  const deriva = s.tendencia * (t - 0.5);
-  let v = s.base * (1 + deriva) + (r - 0.5) * 2 * s.ruido * s.base;
-  // pequeña ondulación intrasemanal, para que no se lea como ruido plano
-  v *= 1 + Math.sin((dow / 7) * Math.PI * 2) * 0.035;
-  if (finde) v *= s.finde;
-  v *= factorFiltros(filtros);
-  return Math.max(s.min, Math.min(s.max, v));
-}
-
-// Valor simulado de un indicador para UN técnico en UN día — perturba
-// valorDelDia con el factor estable de ese técnico. Es la base de
-// porTecnicoDia y de la banda min/máx (que necesitan un valor por
-// técnico, no sólo el agregado del día).
-function valorDelDiaTecnico(ind, fecha, filtros, tecnico) {
-  const base = valorDelDia(ind, fecha, filtros);
-  const semilla = hash(ind.id + "|tecnico|" + tecnico.id + "|" + iso(fecha));
-  const r = mulberry32(semilla)();
-  return Math.max(ind.sim.min, base * tecnicoFactor(tecnico.id) * (0.85 + r * 0.3));
-}
-
-// Solicitudes de inserción en vivo ese día (denominador de la tasa) — sin
-// esto, un 60% sobre 3 solicitudes se ve idéntico a un 60% sobre 40.
-function solicitudesDelDia(fecha, filtros) {
-  const semilla = hash("insercion_vivo_solicitudes|" + iso(fecha) + "|" + filtros.zona + "|" + filtros.tipoOT);
-  const r = mulberry32(semilla)();
-  return Math.round(4 + r * 38);
-}
-
-function obtenerSerie(indicadorId, rango, filtros) {
+function obtenerSerie(indicadorId, rango, filtros, base) {
   /* ---- INICIO DEL CUERPO REEMPLAZABLE ---------------------------------- */
   const ind = INDICADORES.find((x) => x.id === indicadorId);
   if (!ind) return { serie: [], anterior: [], porTecnico: [], vacio: true, motivoVacio: "Indicador no encontrado." };
@@ -343,7 +220,7 @@ function obtenerSerie(indicadorId, rango, filtros) {
     };
   }
 
-  const candidatos = CP_DATA.tecnicos.filter(
+  const candidatos = ((base && base.tecnicos) || []).filter(
     (t) =>
       (filtros.tecnico === "todos" || t.id === filtros.tecnico) &&
       (filtros.zona === "todas" || t.zona === filtros.zona)
@@ -360,60 +237,113 @@ function obtenerSerie(indicadorId, rango, filtros) {
   }
 
   const dias = diasDelRango(rango);
-  const n = dias.length;
-  const serie = dias.map((d) => {
-    const punto = { iso: iso(d), etiqueta: etiquetaFecha(d), valor: valorDelDia(ind, d, filtros) };
+  return derivarKpiReal(ind, dias, filtros, base, candidatos);
+  /* ---- FIN DEL CUERPO REEMPLAZABLE ------------------------------------- */
+}
 
-    if (ind.grafico === "linea_banda_min_max" && candidatos.length) {
-      const valores = candidatos.map((t) => valorDelDiaTecnico(ind, d, filtros, t)).sort((a, b) => a - b);
-      punto.min = valores[0];
-      punto.max = valores[valores.length - 1];
-    }
-    if (ind.grafico === "barras_apiladas_linea_secundaria") {
-      const solicitudes = solicitudesDelDia(d, filtros);
-      const insertadas = Math.round(solicitudes * (punto.valor / 100));
-      punto.insertadas = insertadas;
-      punto.rechazadas = Math.max(0, solicitudes - insertadas);
+/* ==========================================================================
+   4b. KPI REALES — HU-24 (GET /api/kpis/rango), agregados localmente (HU-27)
+   --------------------------------------------------------------------------
+   useTablero carga una sola vez toda la VENTANA (los 30 días de historia que
+   guarda GoodRoute + los próximos días) con dos llamadas a /api/kpis/rango:
+   la global (con eso ya se ve el tablero) y la de por_tecnico=true (filtro
+   de técnico/zona, tabla y banda min/máx). Con eso, período, técnico y zona
+   se resuelven acá en memoria sumando las partes — nunca promediando los
+   `valor` — sin volver a llamar al backend.
+
+   base = {
+     ventana: { desde, hasta },          // ISO, lo que se cargó
+     tecnicos: [...],                    // padrón de GoodRoute
+     global: { [fecha]: { [sigla]: kpi } },
+     porTecnico: { [tecnicoId]: { [fecha]: { [sigla]: kpi } } },
+     tecnicosCargados: n,                // 0 hasta que llega el desglose
+   }
+   ========================================================================== */
+const VENTANA_DIAS_ATRAS = 30;
+const VENTANA_DIAS_ADELANTE = 7;
+// OTP y TPL existen solo en global (/api/kpis/rango no los desglosa por técnico).
+const SIN_DESGLOSE_POR_TECNICO = new Set(["OTP", "TPL"]);
+
+// Suma numerador/denominador de varias fuentes (técnicos o el global) y
+// devuelve el valor con la misma regla de HU-24: conteo -> numerador;
+// promedio -> num/den; TAR -> num/den en %. Denominador 0 -> null.
+function combinarPartes(ind, kpis) {
+  const presentes = kpis.filter(Boolean);
+  if (!presentes.length) return null;
+  const num = presentes.reduce((a, k) => a + (k.numerador || 0), 0);
+  const esConteo = presentes.every((k) => k.denominador == null);
+  if (esConteo) return { num, den: null, valor: num };
+  const den = presentes.reduce((a, k) => a + (k.denominador || 0), 0);
+  if (!den) return { num, den, valor: null };
+  const escala = ind.formato === "pct" ? escalaPct(presentes) : 1;
+  return { num, den, valor: (num / den) * escala };
+}
+// TAR viene en %: si el backend ya entrega num/den como fracción, hay que
+// multiplicar por 100. Se deduce de un KPI con valor, para no asumirlo.
+function escalaPct(kpis) {
+  const k = kpis.find((x) => x.valor != null && x.denominador);
+  if (!k) return 100;
+  return Math.abs(k.valor - k.numerador / k.denominador) < 1e-6 ? 1 : 100;
+}
+
+function derivarKpiReal(ind, dias, filtros, base, candidatos) {
+  const vacio = (motivo, extra) => ({ serie: [], anterior: [], porTecnico: [], vacio: true, motivoVacio: motivo, ...extra });
+  if (!base) return vacio("Cargando indicadores de GoodRoute…");
+  const sigla = ind.sigla;
+  const isos = dias.map(iso);
+  const porTecnicoFiltrado = filtros.tecnico !== "todos" || filtros.zona !== "todas";
+
+  if (porTecnicoFiltrado && SIN_DESGLOSE_POR_TECNICO.has(sigla)) {
+    return vacio("GoodRoute calcula " + sigla + " solo a nivel de sistema: no se puede filtrar por técnico ni por zona. Sacá esos filtros para verlo.");
+  }
+  const tecs = filtros.tecnico !== "todos" ? candidatos.filter((t) => t.id === filtros.tecnico) : candidatos;
+  const faltanTecnicos = tecs.some((t) => !base.porTecnico[t.id]);
+  if (porTecnicoFiltrado && faltanTecnicos) {
+    return vacio("Cargando el desglose por técnico…", { desgloseCargando: true });
+  }
+
+  const kpiDe = (mapa, f) => (mapa && mapa[f] ? mapa[f][sigla] : null);
+  const fuentesDelDia = (f) => (porTecnicoFiltrado ? tecs.map((t) => kpiDe(base.porTecnico[t.id], f)) : [kpiDe(base.global, f)]);
+
+  const banda = ind.grafico === "linea_banda_min_max" && !faltanTecnicos;
+  const serie = dias.map((d, i) => {
+    const f = isos[i];
+    const c = combinarPartes(ind, fuentesDelDia(f));
+    const punto = { iso: f, etiqueta: etiquetaFecha(d), valor: c ? c.valor : null };
+    if (banda) {
+      const valores = tecs.map((t) => combinarPartes(ind, [kpiDe(base.porTecnico[t.id], f)]))
+        .filter((x) => x && x.valor != null).map((x) => x.valor).sort((a, b) => a - b);
+      if (valores.length) { punto.min = valores[0]; punto.max = valores[valores.length - 1]; }
     }
     return punto;
   });
 
-  // "anterior" (el período inmediatamente previo) hoy NO se muestra en la
-  // interfaz: la línea base para comparar todavía no está acordada con el
-  // supervisor. Se deja calculado para reactivar la comparación el día que
-  // sí lo esté — no borrar este bloque.
-  const previos = [];
-  for (let i = n - 1; i >= 0; i--) {
-    const d = new Date(dias[0]); d.setDate(dias[0].getDate() - (i + 1)); previos.push(d);
-  }
-  const anterior = previos.map((d) => ({
-    iso: iso(d), etiqueta: etiquetaFecha(d), valor: valorDelDia(ind, d, filtros),
-  }));
-
-  const promedio = serie.reduce((a, b) => a + b.valor, 0) / Math.max(1, serie.length);
-  const porTecnico = candidatos.map((t) => {
-    const r = mulberry32(hash(ind.id + t.id + filtros.tipoOT))();
-    return {
-      id: t.id, nombre: CP_DATA.tnombre(t), zona: t.zona, tipo: t.tipo,
-      valor: Math.max(ind.sim.min, promedio * tecnicoFactor(t.id) * (0.88 + r * 0.26)),
-    };
-  });
-
-  // Desglose día a día por técnico — sólo para el ranking horizontal, que
-  // es el único gráfico que lo necesita. El resto de los indicadores no
-  // paga el costo de calcularlo.
-  let porTecnicoDia;
-  if (ind.grafico === "barras_horizontales_ranking") {
-    porTecnicoDia = candidatos.map((t) => ({
-      id: t.id, nombre: CP_DATA.tnombre(t), zona: t.zona, tipo: t.tipo,
-      dias: dias.map((d) => ({
-        iso: iso(d), etiqueta: etiquetaFecha(d), valor: valorDelDiaTecnico(ind, d, filtros, t),
-      })),
-    }));
+  const enVentana = isos.filter((f) => f >= base.ventana.desde && f <= base.ventana.hasta);
+  if (!enVentana.length) {
+    return vacio("GoodRoute guarda " + VENTANA_DIAS_ATRAS + " días de historia (desde el " + fechaCompleta(base.ventana.desde) + "): el período elegido queda fuera.");
   }
 
-  return { serie, anterior, porTecnico, porTecnicoDia, vacio: serie.length === 0, motivoVacio: "" };
-  /* ---- FIN DEL CUERPO REEMPLAZABLE ------------------------------------- */
+  // Valor del período: se suman las partes de todos los días (HU-24), no
+  // se promedian los valores diarios.
+  const delPeriodo = combinarPartes(ind, enVentana.flatMap(fuentesDelDia));
+
+  let porTecnico = [];
+  let desgloseCargando = false;
+  if (ind.granularidad !== "global") {
+    if (faltanTecnicos) desgloseCargando = true;
+    else {
+      porTecnico = tecs.map((t) => {
+        const c = combinarPartes(ind, enVentana.map((f) => kpiDe(base.porTecnico[t.id], f)));
+        return { id: t.id, nombre: t.nombre, zona: t.zona, tipo: t.tipo, valor: c ? c.valor : null };
+      }).filter((x) => x.valor != null);
+    }
+  }
+
+  return {
+    serie, anterior: [], porTecnico, vacio: false, motivoVacio: "",
+    valorPeriodo: delPeriodo ? delPeriodo.valor : null, desgloseCargando,
+    motivoDesglose: desgloseCargando ? "Cargando el desglose por técnico…" : "",
+  };
 }
 
 /* ==========================================================================
@@ -422,8 +352,9 @@ function obtenerSerie(indicadorId, rango, filtros) {
 const nf = (v, d = 0) =>
   v.toLocaleString("es-CL", { minimumFractionDigits: d, maximumFractionDigits: d });
 
+// null = sin datos (ej. un promedio con denominador 0): nunca se muestra como 0.
 function formatear(valor, formato) {
-  if (valor == null || Number.isNaN(valor)) return "—";
+  if (valor == null || Number.isNaN(valor)) return "Sin datos";
   switch (formato) {
     case "pct": return nf(valor, 1) + " %";
     case "clp": return "$" + nf(Math.round(valor));
@@ -435,7 +366,7 @@ function formatear(valor, formato) {
   }
 }
 function formatearCorto(valor, formato) {
-  if (valor == null) return "—";
+  if (valor == null) return "Sin datos";
   if (formato === "clp" || formato === "clpOT") {
     if (Math.abs(valor) >= 1000000) return "$" + nf(valor / 1000000, 1) + "M";
     if (Math.abs(valor) >= 1000) return "$" + nf(Math.round(valor / 1000)) + "k";
@@ -444,16 +375,18 @@ function formatearCorto(valor, formato) {
   return formatear(valor, formato);
 }
 
-const promedio = (arr) => (arr.length ? arr.reduce((a, b) => a + b.valor, 0) / arr.length : null);
-const suma = (arr) => arr.reduce((a, b) => a + b.valor, 0);
+// Los días sin dato (valor null, ej. una tasa sin OT ese día) no cuentan.
+const conValor = (arr) => arr.filter((x) => x.valor != null);
+const promedio = (arr) => { const v = conValor(arr); return v.length ? v.reduce((a, b) => a + b.valor, 0) / v.length : null; };
+const suma = (arr) => conValor(arr).reduce((a, b) => a + b.valor, 0);
 
 // Los indicadores de conteo y de ahorro se leen como total; el resto, como promedio.
-const esAcumulable = (ind) => ["ot_asignadas", "ot_realizadas", "dist_optimizada"].includes(ind.id);
+const esAcumulable = (ind) => ["ot_asignadas", "ot_realizadas", "ot_pendientes", "ot_reprogramadas"].includes(ind.id);
 const valorRepresentativo = (ind, serie) =>
   serie.length === 0 ? null : esAcumulable(ind) ? suma(serie) : promedio(serie);
 
 // Texto corto de la dirección declarada de un indicador — sale de INDICADORES,
-// nunca a mano. Se usa en la tarjeta y en el popover de definición.
+// nunca a mano. Se usa en la tarjeta y en las exportaciones.
 function direccionTexto(ind) {
   return ind.direccion === "mas" ? "más es mejor"
     : ind.direccion === "menos" ? "menos es mejor"
@@ -480,14 +413,20 @@ function lectura(ind, valorActual) {
    6. PIEZAS DE INTERFAZ COMPARTIDAS
    ========================================================================== */
 
-function AvisoDatoSimulado() {
-  if (USANDO_DATOS_REALES) return null;
-  return <Badge cls="b-amber" icon="alert">Datos simulados — no usar para decisiones</Badge>;
-}
-
+// Popover "qué mide": definición y fórmula — el nombre y la dirección ya se
+// ven en la tarjeta, y la fuente queda en el PDF. En pantallas angostas se
+// muestra fijo abajo (ver .ind-pop en styles.css); en el resto se corre a
+// la izquierda si se saldría por el borde derecho.
 function InfoIndicador({ ind }) {
   const [abierto, setAbierto] = useState(false);
+  const [desplazamiento, setDesplazamiento] = useState(0);
   const caja = useRef(null);
+  const pop = useRef(null);
+  useLayoutEffect(() => {
+    if (!abierto || !pop.current) { setDesplazamiento(0); return; }
+    const sobra = pop.current.getBoundingClientRect().right - (window.innerWidth - 16);
+    setDesplazamiento(sobra > 0 ? -sobra : 0);
+  }, [abierto]);
   useEffect(() => {
     if (!abierto) return;
     const cerrar = (e) => { if (caja.current && !caja.current.contains(e.target)) setAbierto(false); };
@@ -502,37 +441,31 @@ function InfoIndicador({ ind }) {
       <button
         type="button"
         aria-label={"Qué mide " + ind.nombre}
-        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 6, color: abierto ? "var(--accent)" : "var(--text-4)" }}
+        aria-expanded={abierto}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 4,
+          // Abierto: borde cuadrado alrededor de la "i" — marca qué tarjeta
+          // abrió el popover (el popover ya no repite el nombre).
+          border: "1.5px solid " + (abierto ? "var(--text)" : "transparent"),
+          color: abierto ? "var(--text)" : "var(--text-4)",
+        }}
         onClick={(e) => { e.stopPropagation(); setAbierto((v) => !v); }}
       >
         <Icon name="info" style={{ width: 15, height: 15 }} />
       </button>
       {abierto && (
-        <div className="ind-pop" onClick={(e) => e.stopPropagation()}>
+        <div className="ind-pop" ref={pop} style={{ "--pop-dx": desplazamiento + "px" }} onClick={(e) => e.stopPropagation()}>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-            <div style={{ fontWeight: 600, fontSize: 13.5, color: "var(--text)" }}>{ind.nombre}</div>
+            <p style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.5 }}>{ind.definicion}</p>
             <button
               type="button" aria-label="Cerrar"
-              style={{ marginLeft: "auto", color: "var(--text-3)", width: 20, height: 20, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 6 }}
+              style={{ marginLeft: "auto", color: "var(--text-3)", width: 20, height: 20, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 6 }}
               onClick={() => setAbierto(false)}
             ><Icon name="x" style={{ width: 14, height: 14 }} /></button>
           </div>
-          <p style={{ marginTop: 8, fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.5 }}>{ind.definicion}</p>
-          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-            <div>
-              <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Fórmula</div>
-              <div className="mono" style={{ fontSize: 12, color: "var(--text)", marginTop: 2 }}>{ind.formula}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Unidad</div>
-              <div style={{ fontSize: 12, color: "var(--text)", marginTop: 2 }}>
-                {ind.unidad} · {direccionTexto(ind)}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Fuente del dato</div>
-              <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 2, lineHeight: 1.5 }}>{ind.fuente}</div>
-            </div>
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Fórmula</div>
+            <div className="mono" style={{ fontSize: 12, color: "var(--text)", marginTop: 2 }}>{ind.formula}</div>
           </div>
         </div>
       )}
@@ -610,27 +543,6 @@ function TooltipBanda({ active, payload, label, ind, etiquetaCentral, etiquetaBa
   );
 }
 
-// Tooltip para gráficos que mezclan series de distinta unidad en un mismo
-// punto (ej. OT contadas junto a un porcentaje) — cada dataKey define cómo
-// formatear su propio valor en vez de usar el formato del indicador para todo.
-function TooltipMixto({ active, payload, label, formatoPorClave }) {
-  if (!active || !payload || !payload.length) return null;
-  return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 8, padding: 12, boxShadow: "var(--shadow-pop)" }}>
-      <div style={{ fontSize: 11.5, color: "var(--text-3)", fontWeight: 600 }}>{label}</div>
-      {payload.map((p) => (
-        <div key={p.dataKey} style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 8, height: 8, borderRadius: 2, background: p.color, display: "inline-block" }} />
-          <span style={{ fontSize: 12, color: "var(--text-2)" }}>{p.name}</span>
-          <span style={{ marginLeft: "auto", fontWeight: 600, fontSize: 12.5, color: "var(--text)" }}>
-            {formatoPorClave[p.dataKey] ? formatoPorClave[p.dataKey](p.value) : p.value}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function SinDatos({ motivo, alto = 220 }) {
   return (
     <div className="empty" style={{ height: alto, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
@@ -643,11 +555,11 @@ function SinDatos({ motivo, alto = 220 }) {
   );
 }
 
-function Cargando({ alto = 220 }) {
+function Cargando({ alto = 220, texto }) {
   return (
     <div style={{ height: alto, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
       <span className="icon-spin" style={{ color: "var(--text-4)" }}><Icon name="refresh" style={{ width: 22, height: 22 }} /></span>
-      <div style={{ marginTop: 8, fontSize: 12.5, color: "var(--text-3)" }}>Recalculando el período…</div>
+      <div style={{ marginTop: 8, fontSize: 12.5, color: "var(--text-3)" }}>{texto || "Cargando indicadores…"}</div>
     </div>
   );
 }
@@ -668,18 +580,22 @@ function Selector({ etiqueta, valor, onChange, opciones }) {
   );
 }
 
+// GoodRoute guarda 30 días de historia (más los próximos días ya
+// programados): no tiene sentido ofrecer 90 días.
 const PRESETS = [
   { valor: "7", texto: "Últimos 7 días" },
+  { valor: "14", texto: "Últimos 14 días" },
   { valor: "30", texto: "Últimos 30 días" },
-  { valor: "90", texto: "Últimos 90 días" },
   { valor: "custom", texto: "Rango personalizado" },
 ];
 
-function BarraFiltros({ rango, setRango, filtros, setFiltros, cargando, onRecargar }) {
+function BarraFiltros({ rango, setRango, filtros, setFiltros, cargando, onRecargar, tecnicos, ventana }) {
   const cambiarPreset = (v) => {
     if (v === "custom") {
-      const desde = new Date(HOY); desde.setDate(HOY.getDate() - 44);
-      setRango({ preset: "custom", dias: 45, desde: iso(desde), hasta: iso(HOY) });
+      // Por defecto: la última semana y los próximos días ya programados.
+      const desde = new Date(HOY); desde.setDate(HOY.getDate() - 6);
+      const hasta = new Date(HOY); hasta.setDate(HOY.getDate() + VENTANA_DIAS_ADELANTE);
+      setRango({ preset: "custom", dias: 7 + VENTANA_DIAS_ADELANTE, desde: iso(desde), hasta: iso(hasta) });
     } else {
       setRango({ preset: v, dias: Number(v), desde: null, hasta: null });
     }
@@ -688,7 +604,7 @@ function BarraFiltros({ rango, setRango, filtros, setFiltros, cargando, onRecarg
     const nuevo = { ...rango, [campo]: valor };
     const d1 = new Date(nuevo.desde), d2 = new Date(nuevo.hasta);
     const dias = Math.max(1, Math.round((d2 - d1) / 86400000) + 1);
-    setRango({ ...nuevo, dias: Math.min(dias, 180) });
+    setRango({ ...nuevo, dias: Math.min(dias, VENTANA_DIAS_ATRAS + VENTANA_DIAS_ADELANTE + 1) });
   };
 
   return (
@@ -696,9 +612,9 @@ function BarraFiltros({ rango, setRango, filtros, setFiltros, cargando, onRecarg
       <Selector etiqueta="Período" valor={rango.preset} onChange={cambiarPreset} opciones={PRESETS} />
       {rango.preset === "custom" && (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input type="date" className="field-input" value={rango.desde || ""} onChange={(e) => cambiarFecha("desde", e.target.value)} style={{ width: 150 }} />
+          <input type="date" className="field-input" value={rango.desde || ""} min={ventana && ventana.desde} max={rango.hasta || (ventana && ventana.hasta)} onChange={(e) => cambiarFecha("desde", e.target.value)} style={{ width: 150 }} />
           <span style={{ color: "var(--text-3)", fontSize: 12 }}>a</span>
-          <input type="date" className="field-input" value={rango.hasta || ""} onChange={(e) => cambiarFecha("hasta", e.target.value)} style={{ width: 150 }} />
+          <input type="date" className="field-input" value={rango.hasta || ""} min={rango.desde || (ventana && ventana.desde)} max={ventana && ventana.hasta} onChange={(e) => cambiarFecha("hasta", e.target.value)} style={{ width: 150 }} />
         </div>
       )}
 
@@ -707,15 +623,14 @@ function BarraFiltros({ rango, setRango, filtros, setFiltros, cargando, onRecarg
       <Selector etiqueta="Técnico" valor={filtros.tecnico}
         onChange={(v) => setFiltros({ ...filtros, tecnico: v })}
         opciones={[{ valor: "todos", texto: "Todos" },
-          ...CP_DATA.tecnicos.map((t) => ({ valor: t.id, texto: CP_DATA.tnombre(t) }))]} />
+          ...tecnicos.map((t) => ({ valor: t.id, texto: t.nombre }))]} />
       <Selector etiqueta="Zona" valor={filtros.zona}
         onChange={(v) => setFiltros({ ...filtros, zona: v })}
         opciones={[{ valor: "todas", texto: "Todas" },
-          ...ZONAS.map((z) => ({ valor: z, texto: z }))]} />
-      <Selector etiqueta="Tipo de OT" valor={filtros.tipoOT}
-        onChange={(v) => setFiltros({ ...filtros, tipoOT: v })}
-        opciones={[{ valor: "todos", texto: "Todos" },
-          ...TIPOS_OT.map((t) => ({ valor: t, texto: t }))]} />
+          ...zonasDe(tecnicos).map((z) => ({ valor: z, texto: z }))]} />
+      {/* Sin filtro por tipo de OT: /api/kpis (HU-24) solo segmenta por
+          fecha y técnico. La zona se resuelve sumando los técnicos de esa
+          zona. */}
 
       <button type="button" onClick={onRecargar} className="btn" style={{ marginLeft: "auto" }}>
         <span className={cargando ? "icon-spin" : ""}><Icon name="refresh" /></span>
@@ -728,30 +643,157 @@ function BarraFiltros({ rango, setRango, filtros, setFiltros, cargando, onRecarg
 /* ==========================================================================
    7. HOOK DE DATOS — un solo lugar donde se pide todo el tablero
    ========================================================================== */
+// Última base cargada — solo para los textos de las exportaciones (nombre
+// del técnico filtrado), que se arman fuera de React.
+let BASE_ACTUAL = null;
+
+// HU-27: el servicio se consulta UNA vez (al entrar y con "Actualizar") —
+// mover un slicer (período, técnico, zona) recalcula todos los KPI visibles
+// al instante, de forma local, sin volver al backend. La carga son dos
+// llamadas a /api/kpis/rango (HU-24) para toda la ventana: primero la
+// global (con eso ya se ve el tablero) y después la de por_tecnico=true
+// (para el filtro de técnico/zona, la tabla y la banda min/máx).
 function useTablero() {
   const [rango, setRango] = useState({ preset: "30", dias: 30, desde: null, hasta: null });
+  // tipoOT queda fijo en "todos": HU-24 no segmenta por tipo (ver BarraFiltros).
   const [filtros, setFiltros] = useState({ tecnico: "todos", zona: "todas", tipoOT: "todos" });
-  const [cargando, setCargando] = useState(false);
+  // Estado explícito del servicio: cargando | ok | error — nunca un
+  // intermedio sin nombre. `actualizadoEn` es la hora de la última carga
+  // exitosa, que se muestra como confirmación de éxito.
+  const [servicio, setServicio] = useState({ estado: "cargando", error: null, actualizadoEn: null });
+  const [base, setBase] = useState(null);
   const [tick, setTick] = useState(0);
 
-  // Estado de carga: hoy es simulado; al conectar el backend queda igual,
-  // porque obtenerSerie() pasará a ser asíncrona detrás de este mismo hook.
   useEffect(() => {
-    setCargando(true);
-    const t = setTimeout(() => setCargando(false), 380);
-    return () => clearTimeout(t);
-  }, [rango, filtros, tick]);
+    let activo = true;
+    setServicio((s) => ({ ...s, estado: "cargando", error: null, erroresKpi: [], errorDesglose: null }));
+    const api = window.RUTAS_EXTERNO_API;
+    const fechas = [];
+    for (let i = -VENTANA_DIAS_ATRAS; i <= VENTANA_DIAS_ADELANTE; i++) {
+      const d = new Date(HOY); d.setDate(HOY.getDate() + i); fechas.push(iso(d));
+    }
+    const ventana = { desde: fechas[0], hasta: fechas[fechas.length - 1] };
+    // Lista plana -> { [fecha]: { [sigla]: kpi } }, global o por técnico.
+    const indexar = (filas) => {
+      const global = {}, porTecnico = {};
+      filas.forEach((k) => {
+        const destino = k.tecnico_id ? (porTecnico[k.tecnico_id] = porTecnico[k.tecnico_id] || {}) : global;
+        (destino[k.fecha] = destino[k.fecha] || {})[k.sigla] = k;
+      });
+      return { global, porTecnico };
+    };
+    const siglasConError = (r) => [...new Set((r.errores || []).map((e) => e.sigla))];
+
+    (async () => {
+      try {
+        const [tecnicos, rGlobal] = await Promise.all([
+          api.obtenerTecnicos(),
+          api.obtenerKpisRango(ventana.desde, ventana.hasta),
+        ]);
+        if (!activo) return;
+        let b = { ventana, tecnicos, global: indexar(rGlobal.kpis || []).global, porTecnico: {}, tecnicosCargados: 0 };
+        BASE_ACTUAL = b;
+        setBase(b);
+        setServicio({ estado: "ok", error: null, actualizadoEn: new Date(), erroresKpi: siglasConError(rGlobal), errorDesglose: null });
+
+        try {
+          const rTec = await api.obtenerKpisRango(ventana.desde, ventana.hasta, { porTecnico: true });
+          if (!activo) return;
+          const { porTecnico } = indexar(rTec.kpis || []);
+          // Un técnico sin ninguna fila en la ventana igual queda "cargado"
+          // (vacío), para que el filtro no se quede esperando para siempre.
+          tecnicos.forEach((t) => { porTecnico[t.id] = porTecnico[t.id] || {}; });
+          b = { ...b, porTecnico, tecnicosCargados: tecnicos.length };
+          BASE_ACTUAL = b;
+          setBase(b);
+          setServicio((s) => ({ ...s, erroresKpi: [...new Set([...(s.erroresKpi || []), ...siglasConError(rTec)])] }));
+        } catch (err) {
+          if (activo) setServicio((s) => ({ ...s, errorDesglose: err.message || "error desconocido" }));
+        }
+      } catch (err) {
+        if (activo) setServicio((s) => ({ ...s, estado: "error", error: err.message || "error desconocido" }));
+      }
+    })();
+    return () => { activo = false; };
+  }, [tick]);
 
   const datos = useMemo(() => {
     const mapa = {};
     INDICADORES.forEach((ind) => {
-      const d = obtenerSerie(ind.id, rango, filtros);
-      mapa[ind.id] = { ...d, valor: valorRepresentativo(ind, d.serie) };
+      const d = obtenerSerie(ind.id, rango, filtros, base);
+      // Los KPI de HU-24 traen su propio valor del período (suma de partes).
+      mapa[ind.id] = { ...d, valor: d.valorPeriodo !== undefined ? d.valorPeriodo : valorRepresentativo(ind, d.serie) };
     });
     return mapa;
-  }, [rango, filtros, tick]);
+  }, [rango, filtros, base]);
 
-  return { rango, setRango, filtros, setFiltros, cargando, datos, recargar: () => setTick((t) => t + 1) };
+  const cargando = servicio.estado === "cargando";
+  return {
+    rango, setRango, filtros, setFiltros, cargando, servicio, datos,
+    tecnicos: (base && base.tecnicos) || [], ventana: base && base.ventana,
+    desglose: base ? { cargados: base.tecnicosCargados, total: base.tecnicos.length } : null,
+    recargar: () => setTick((t) => t + 1),
+  };
+}
+
+// Período efectivo en fechas concretas (no "últimos 30 días") — se muestra
+// en la cabecera, el gráfico y la tabla, para que el período sea
+// reconocible en todo momento sin inferirlo de los filtros (HU-27).
+function periodoDelRango(rango) {
+  const dias = diasDelRango(rango);
+  if (!dias.length) return null;
+  return { desde: iso(dias[0]), hasta: iso(dias[dias.length - 1]), dias: dias.length };
+}
+function textoPeriodo(p) {
+  if (!p) return "—";
+  return fechaCompleta(p.desde) + " – " + fechaCompleta(p.hasta) + " · " + p.dias + (p.dias === 1 ? " día" : " días");
+}
+
+function EstadoServicio({ servicio, desglose, onReintentar }) {
+  if (servicio.estado === "cargando") {
+    return (
+      <span className="row-flex" style={{ gap: 6, fontSize: 12.5, color: "var(--text-3)" }}>
+        <span className="rx-ring rx-ring-14" aria-hidden="true" />Cargando indicadores…
+      </span>
+    );
+  }
+  if (servicio.estado === "error") {
+    return (
+      <span className="row-flex" style={{ gap: 8, fontSize: 12.5, color: "var(--red-fg)" }}>
+        <Icon name="alert" style={{ width: 14, height: 14 }} />No se pudieron cargar los indicadores: {servicio.error}
+        <button type="button" className="btn btn-sm" onClick={onReintentar}>Reintentar</button>
+      </span>
+    );
+  }
+  const hora = servicio.actualizadoEn
+    ? String(servicio.actualizadoEn.getHours()).padStart(2, "0") + ":" + String(servicio.actualizadoEn.getMinutes()).padStart(2, "0")
+    : null;
+  const avisos = [];
+  if (servicio.erroresKpi && servicio.erroresKpi.length) avisos.push("GoodRoute no pudo calcular " + servicio.erroresKpi.join(", ") + " (por ejemplo, sin conexión a su base de datos)");
+  if (servicio.errorDesglose) avisos.push("No se pudo cargar el desglose por técnico: " + servicio.errorDesglose);
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: "6px 18px", fontSize: 12.5, color: "var(--text-3)" }}>
+      <span className="row-flex" style={{ gap: 6 }}>
+        <Icon name="checkC" style={{ width: 14, height: 14, color: "var(--green-fg)" }} />
+        Datos actualizados{hora ? " a las " + hora : ""}
+      </span>
+      {desglose && desglose.cargados < desglose.total && !servicio.errorDesglose && (
+        <span className="row-flex" style={{ gap: 6 }}>
+          <span className="rx-ring rx-ring-14" aria-hidden="true" />
+          Cargando el desglose por técnico…
+        </span>
+      )}
+      {avisos.length > 0 && (
+        <span className="row-flex" style={{ gap: 6, color: "var(--amber-fg)" }}>
+          <Icon name="alert" style={{ width: 14, height: 14 }} />{avisos.join(" · ")}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function SiglaKPI({ ind }) {
+  return <span className="kpi-sigla">{ind.sigla}</span>;
 }
 
 /* ==========================================================================
@@ -806,7 +848,7 @@ function GraficoLinea({ ind, d, grupo }) {
   );
 }
 
-// utilizacion_jornada, cumplimiento_ventana, tiempo_traslado, tiempo_servicio:
+// tiempo_traslado, tiempo_servicio:
 // promedio + banda sombreada entre el mínimo y el máximo entre técnicos ese
 // día. La dispersión es el hallazgo: 81% de promedio puede ser todos en 81,
 // o uno en 98 y otro en 60. Mantiene la banda verde del rango objetivo
@@ -833,33 +875,7 @@ function GraficoBandaMinMax({ ind, d, grupo }) {
   );
 }
 
-// insercion_vivo: OT insertadas + rechazadas apiladas (volumen), más la tasa
-// como línea sobre un eje secundario. 60% sobre 3 solicitudes y 60% sobre
-// 40 son situaciones distintas — el volumen tiene que verse.
-function GraficoBarrasStackLinea({ ind, d }) {
-  const datos = d.serie.map((p) => ({
-    etiqueta: p.etiqueta, insertadas: p.insertadas || 0, rechazadas: p.rechazadas || 0, tasa: p.valor,
-  }));
-  const formatos = {
-    insertadas: (v) => nf(v, 0) + " OT", rechazadas: (v) => nf(v, 0) + " OT", tasa: (v) => formatear(v, "pct"),
-  };
-  return (
-    <ResponsiveContainer width="100%" height={280}>
-      <ComposedChart data={datos} margin={MARGEN_GRAFICO}>
-        <CartesianGrid stroke="var(--border)" vertical={false} />
-        <XAxis dataKey="etiqueta" {...EJE_X} />
-        <YAxis yAxisId="izq" tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={40} tickFormatter={(v) => nf(v, 0)} />
-        <YAxis yAxisId="der" orientation="right" tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} width={46} domain={[0, 100]} tickFormatter={(v) => nf(v, 0) + "%"} />
-        <Tooltip content={<TooltipMixto formatoPorClave={formatos} />} />
-        <Bar yAxisId="izq" dataKey="insertadas" name="Insertadas" stackId="ot" fill="var(--accent)" isAnimationActive={false} />
-        <Bar yAxisId="izq" dataKey="rechazadas" name="Rechazadas" stackId="ot" fill="var(--border-3)" isAnimationActive={false} />
-        <Line yAxisId="der" type="monotone" dataKey="tasa" name="Tasa" stroke="var(--accent-strong)" strokeWidth={2} dot={false} isAnimationActive={false} />
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
-}
-
-// ot_asignadas / dist_optimizada: barras verticales — conteo/flujo diario
+// ot_asignadas: barras verticales — conteo/flujo diario
 // discreto, una línea inventaría continuidad entre un día y el siguiente.
 function GraficoBarras({ ind, d, grupo }) {
   const datos = d.serie.map((p) => ({ etiqueta: p.etiqueta, valor: p.valor }));
@@ -876,29 +892,6 @@ function GraficoBarras({ ind, d, grupo }) {
   );
 }
 
-// km_tecnico: ranking horizontal — la pregunta es quién recorre de más, no
-// cómo evolucionó el total. Un valor por técnico (promedio del período,
-// mismo criterio que el resto de la pantalla para este indicador),
-// ordenado de mayor a menor.
-function GraficoBarrasHorizontales({ ind, d, grupo }) {
-  const porTecnicoDia = d.porTecnicoDia || [];
-  if (!porTecnicoDia.length) return <SinDatos motivo="No hay técnicos para mostrar en este período." alto={280} />;
-  const datos = porTecnicoDia
-    .map((t) => ({ nombre: t.nombre, valor: promedio(t.dias) }))
-    .sort((a, b) => b.valor - a.valor);
-  return (
-    <ResponsiveContainer width="100%" height={280}>
-      <ComposedChart data={datos} layout="vertical" margin={{ top: 4, right: 24, bottom: 4, left: 4 }}>
-        <CartesianGrid stroke="var(--border)" horizontal={false} />
-        <XAxis type="number" tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={{ stroke: "var(--border-2)" }} tickFormatter={(v) => formatearCorto(v, ind.formato)} />
-        <YAxis type="category" dataKey="nombre" width={130} tick={{ fontSize: 11.5, fill: "var(--text-2)" }} tickLine={false} axisLine={false} />
-        <Tooltip content={<TooltipGrafico ind={ind} />} />
-        <Bar dataKey="valor" name="Valor" fill={grupo.color} radius={[0, 3, 3, 0]} isAnimationActive={false} />
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
-}
-
 // Único punto que sabe qué componente corresponde a cada "grafico" — y la
 // frase corta que explica qué se está mostrando. Un indicador nuevo con
 // un "grafico" existente hereda ambos solo con aparecer acá.
@@ -906,17 +899,13 @@ const GRAFICOS_POR_TIPO = {
   area: GraficoArea,
   linea: GraficoLinea,
   linea_banda_min_max: GraficoBandaMinMax,
-  barras_apiladas_linea_secundaria: GraficoBarrasStackLinea,
   barras_verticales: GraficoBarras,
-  barras_horizontales_ranking: GraficoBarrasHorizontales,
 };
 const EXPLICACION_POR_TIPO = {
   area: "evolución diaria",
   linea: "evolución diaria",
   linea_banda_min_max: "promedio con mínimo y máximo entre técnicos",
-  barras_apiladas_linea_secundaria: "insertadas y rechazadas por día, con la tasa",
   barras_verticales: "total diario",
-  barras_horizontales_ranking: "promedio del período por técnico, de mayor a menor",
 };
 
 /* ==========================================================================
@@ -929,6 +918,7 @@ function TarjetaKPI({ ind, d, activo, onSelect, cargando }) {
     <div onClick={() => onSelect(ind.id)} className={"ind-card" + (activo ? " active" : "")}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
         <span style={{ width: 3, height: 15, borderRadius: 3, background: grupo.color, flex: "none", marginTop: 2 }} />
+        <SiglaKPI ind={ind} />
         <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-2)", lineHeight: 1.3 }}>{ind.nombre}</span>
         <span style={{ marginLeft: "auto" }} onClick={(e) => e.stopPropagation()}><InfoIndicador ind={ind} /></span>
       </div>
@@ -954,7 +944,7 @@ function TarjetaKPI({ ind, d, activo, onSelect, cargando }) {
 }
 
 // "Todos" no es un grupo real — es un atajo de UI para volver a la grilla
-// plana con los diez indicadores juntos. Por eso no vive en GRUPOS: agregar
+// plana con todos los indicadores juntos. Por eso no vive en GRUPOS: agregar
 // una entrada falsa ahí rompería los lookups que hacen TarjetaKPI/TablaTecnicos
 // contra el grupo real de cada indicador.
 const TODOS_ID = "todos";
@@ -962,7 +952,7 @@ const TODOS_ID = "todos";
 // Botonera de categorías: una pestaña por grupo, generada iterando GRUPOS —
 // un grupo nuevo en INDICADORES/GRUPOS aparece acá solo, sin tocar este
 // componente. "Todos" va al final, fijo.
-function BotonesCategoria({ grupoActivo, onCambiar }) {
+function BotonesCategoria({ grupoActivo, onCambiar, indicadores }) {
   const boton = (key, on, color, nombre, cantidad) => (
     <button key={key} type="button" role="tab" aria-selected={on}
       onClick={() => onCambiar(key)}
@@ -988,14 +978,14 @@ function BotonesCategoria({ grupoActivo, onCambiar }) {
   return (
     <nav style={{ display: "flex", flexWrap: "wrap", gap: 8 }} role="tablist" aria-label="Categorías de indicadores">
       {GRUPOS.map((g) =>
-        boton(g.id, g.id === grupoActivo, g.color, g.nombre, INDICADORES.filter((i) => i.grupo === g.id).length)
+        boton(g.id, g.id === grupoActivo, g.color, g.nombre, indicadores.filter((i) => i.grupo === g.id).length)
       )}
-      {boton(TODOS_ID, grupoActivo === TODOS_ID, "var(--text-3)", "Todos", INDICADORES.length)}
+      {boton(TODOS_ID, grupoActivo === TODOS_ID, "var(--text-3)", "Todos", indicadores.length)}
     </nav>
   );
 }
 
-function GraficoPrincipal({ ind, d, cargando, graficoRef }) {
+function GraficoPrincipal({ ind, d, cargando, graficoRef, periodo }) {
   const grupo = GRUPOS.find((g) => g.id === ind.grupo);
   const nota = lectura(ind, d.valor);
   const explicacion = EXPLICACION_POR_TIPO[ind.grafico] || EXPLICACION_POR_TIPO.area;
@@ -1006,6 +996,7 @@ function GraficoPrincipal({ ind, d, cargando, graficoRef }) {
       <div className="block-head" style={{ flexWrap: "wrap" }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <SiglaKPI ind={ind} />
             <div className="block-title">{ind.nombre}</div>
             <InfoIndicador ind={ind} />
           </div>
@@ -1019,11 +1010,12 @@ function GraficoPrincipal({ ind, d, cargando, graficoRef }) {
           <div style={{ fontSize: 21, fontWeight: 680, letterSpacing: "-0.5px" }}>
             {d.vacio ? "—" : formatear(d.valor, ind.formato)}
           </div>
+          <div style={{ fontSize: 11.5, color: "var(--text-3)" }}>{textoPeriodo(periodo)}</div>
         </div>
       </div>
 
       <div ref={graficoRef} className="block-body" style={{ paddingTop: 18, paddingBottom: 8 }}>
-        {cargando ? <Cargando alto={280} /> : d.vacio ? <SinDatos motivo={d.motivoVacio} alto={280} /> : (
+        {cargando || (d.vacio && d.desgloseCargando) ? <Cargando alto={280} texto={d.motivoVacio} /> : d.vacio ? <SinDatos motivo={d.motivoVacio} alto={280} /> : (
           <Grafico ind={ind} d={d} grupo={grupo} />
         )}
       </div>
@@ -1031,7 +1023,7 @@ function GraficoPrincipal({ ind, d, cargando, graficoRef }) {
   );
 }
 
-function TablaTecnicos({ ind, d, cargando, tablaRef }) {
+function TablaTecnicos({ ind, d, cargando, tablaRef, periodo }) {
   const [orden, setOrden] = useState({ campo: "valor", asc: false });
   const filas = useMemo(() => {
     const copia = [...d.porTecnico];
@@ -1060,10 +1052,12 @@ function TablaTecnicos({ ind, d, cargando, tablaRef }) {
     <>
       <div className="sec-head">
         <div className="sec-title">Detalle por técnico</div>
-        <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>{ind.nombre} · {esAcumulable(ind) ? "total" : "promedio"} del período</span>
+        <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>{ind.sigla} · {esAcumulable(ind) ? "total" : "promedio"} · {textoPeriodo(periodo)}</span>
       </div>
       <div ref={tablaRef} className="card">
-        {cargando ? <Cargando alto={200} /> : d.vacio ? <SinDatos motivo={d.motivoVacio} alto={200} /> : (
+        {cargando || d.desgloseCargando ? <Cargando alto={200} texto={d.motivoDesglose || d.motivoVacio} /> : d.vacio ? <SinDatos motivo={d.motivoVacio} alto={200} /> : ind.granularidad === "global" ? (
+          <SinDatos alto={160} motivo="Este indicador se mide a nivel de sistema: no tiene desglose por técnico." />
+        ) : (
           <table className="tbl">
             <thead>
               <tr>
@@ -1122,11 +1116,11 @@ function textoCategoriaActiva(grupoActivo, grupo) {
 function textoFiltrosActivos(filtros) {
   const partes = [];
   if (filtros.tecnico !== "todos") {
-    const t = CP_DATA.techById[filtros.tecnico];
-    if (t) partes.push("Técnico: " + CP_DATA.tnombre(t));
+    const t = BASE_ACTUAL && BASE_ACTUAL.tecnicos.find((x) => x.id === filtros.tecnico);
+    partes.push("Técnico: " + (t ? t.nombre : filtros.tecnico));
   }
   if (filtros.zona !== "todas") partes.push("Zona: " + filtros.zona);
-  if (filtros.tipoOT !== "todos") partes.push("Tipo de OT: " + filtros.tipoOT);
+  if (filtros.tipoOT !== "todos") partes.push("Tipo de OT: " + (TIPO_OT_LABEL[filtros.tipoOT] || filtros.tipoOT));
   return partes.length ? partes.join("  ·  ") : "Sin filtros aplicados";
 }
 
@@ -1260,16 +1254,6 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
       fontSize: 9.5, color: paleta.text2, margin: [0, 0, 0, 12],
     },
   ];
-
-  // Aviso de datos simulados: obligatorio mientras USANDO_DATOS_REALES sea
-  // false, no hay manera de omitirlo desde acá.
-  if (!USANDO_DATOS_REALES) {
-    contenido.push({
-      table: { widths: ["*"], body: [[{ text: "AVISO — Datos simulados: no usar para decisiones", fontSize: 10.5, bold: true, color: paleta.amberFg, fillColor: paleta.amberBg, margin: [10, 8, 10, 8], border: [false, false, false, false] }]] },
-      layout: "noBorders",
-      margin: [0, 0, 0, 14],
-    });
-  }
 
   // Cada título va pegado (unbreakable) a lo primero de su sección, para que
   // nunca quede un encabezado solo al final de una página con el contenido
@@ -1419,7 +1403,6 @@ async function construirLibroExcel({ grupo, delGrupo, ind, datos, imagenGrafico,
   const wsSerie = wb.addWorksheet("Serie diaria");
   const d = datos[ind.id];
   const tieneBanda = ind.grafico === "linea_banda_min_max";
-  const tieneInsercion = ind.grafico === "barras_apiladas_linea_secundaria";
   const columnasBase = [
     { header: "Fecha", key: "etiqueta", width: 12 },
     { header: ind.nombre + " (" + ind.unidad + ")", key: "valor", width: 26 },
@@ -1428,20 +1411,15 @@ async function construirLibroExcel({ grupo, delGrupo, ind, datos, imagenGrafico,
     columnasBase.push({ header: "Mínimo entre técnicos", key: "min", width: 22 });
     columnasBase.push({ header: "Máximo entre técnicos", key: "max", width: 22 });
   }
-  if (tieneInsercion) {
-    columnasBase.push({ header: "Insertadas", key: "insertadas", width: 14 });
-    columnasBase.push({ header: "Rechazadas", key: "rechazadas", width: 14 });
-  }
   wsSerie.columns = columnasBase;
   if (d.vacio || !d.serie.length) {
     wsSerie.addRow({ etiqueta: "Sin datos con los filtros actuales." });
   } else {
     d.serie.forEach((p) => {
       wsSerie.addRow({
-        etiqueta: p.etiqueta, valor: Number(p.valor.toFixed(2)),
+        etiqueta: p.etiqueta, valor: p.valor != null ? Number(p.valor.toFixed(2)) : undefined,
         min: p.min != null ? Number(p.min.toFixed(2)) : undefined,
         max: p.max != null ? Number(p.max.toFixed(2)) : undefined,
-        insertadas: p.insertadas, rechazadas: p.rechazadas,
       });
     });
     wsSerie.getColumn("valor").numFmt = numFmtExcel(ind.formato);
@@ -1483,20 +1461,22 @@ async function construirLibroExcel({ grupo, delGrupo, ind, datos, imagenGrafico,
    PANTALLA — montada por app/main.jsx en route.screen === "analisis"
    ========================================================================== */
 function DashboardAnalisisScreen() {
-  const { rango, setRango, filtros, setFiltros, cargando, datos, recargar } = useTablero();
+  const { rango, setRango, filtros, setFiltros, cargando, servicio, datos, tecnicos, ventana, desglose, recargar } = useTablero();
+  const periodo = periodoDelRango(rango);
+  const visibles = INDICADORES;
   const [grupoActivo, setGrupoActivo] = useState(GRUPOS[0].id);
   const grupo = grupoActivo === TODOS_ID ? null : GRUPOS.find((g) => g.id === grupoActivo);
-  const delGrupo = grupoActivo === TODOS_ID ? INDICADORES : INDICADORES.filter((i) => i.grupo === grupoActivo);
+  const delGrupo = grupoActivo === TODOS_ID ? visibles : visibles.filter((i) => i.grupo === grupoActivo);
 
   const [seleccionado, setSeleccionado] = useState(delGrupo[0].id);
-  const ind = INDICADORES.find((i) => i.id === seleccionado) || delGrupo[0];
+  const ind = delGrupo.find((i) => i.id === seleccionado) || delGrupo[0];
 
   // Cambiar de categoría siempre mueve el gráfico grande al primer indicador
   // del conjunto que queda visible (todo INDICADORES si es "Todos"), para que
   // nunca quede mostrando un KPI que no está en la grilla filtrada.
   const cambiarCategoria = (grupoId) => {
     setGrupoActivo(grupoId);
-    const conjunto = grupoId === TODOS_ID ? INDICADORES : INDICADORES.filter((i) => i.grupo === grupoId);
+    const conjunto = grupoId === TODOS_ID ? visibles : visibles.filter((i) => i.grupo === grupoId);
     if (conjunto[0]) setSeleccionado(conjunto[0].id);
   };
 
@@ -1586,45 +1566,57 @@ function DashboardAnalisisScreen() {
       <div className="page-head">
         <div>
           <div className="page-title">Análisis</div>
-          <div className="page-sub">Indicadores de asignación en el tiempo</div>
+          <div className="page-sub">
+            Período: <b style={{ color: "var(--text)" }}>{textoPeriodo(periodo)}</b>
+          </div>
         </div>
-        <div className="page-head-actions">
-          <AvisoDatoSimulado />
-          {errorExcel && <span style={{ fontSize: 12, color: "var(--red-fg)" }}>{errorExcel}</span>}
-          <button type="button" onClick={descargarExcel} disabled={generandoExcel || cargando} className="btn"
-            style={{ opacity: generandoExcel || cargando ? 0.6 : 1, cursor: generandoExcel || cargando ? "not-allowed" : "pointer" }}>
-            <span className={generandoExcel ? "icon-spin" : ""}><Icon name={generandoExcel ? "refresh" : "download"} /></span>
-            {generandoExcel ? "Generando…" : "Descargar Excel"}
-          </button>
-          {errorPdf && <span style={{ fontSize: 12, color: "var(--red-fg)" }}>{errorPdf}</span>}
-          <button type="button" onClick={descargarPdf} disabled={generandoPdf || cargando} className="btn"
-            style={{ opacity: generandoPdf || cargando ? 0.6 : 1, cursor: generandoPdf || cargando ? "not-allowed" : "pointer" }}>
-            <span className={generandoPdf ? "icon-spin" : ""}><Icon name={generandoPdf ? "refresh" : "download"} /></span>
-            {generandoPdf ? "Generando…" : "Descargar PDF"}
-          </button>
+        {/* Botones de descarga y, debajo, el estado de la última carga —
+            a la altura del período. */}
+        <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+          <div className="page-head-actions">
+            {errorExcel && <span style={{ fontSize: 12, color: "var(--red-fg)" }}>{errorExcel}</span>}
+            <button type="button" onClick={descargarExcel} disabled={generandoExcel || cargando} className="btn"
+              style={{ opacity: generandoExcel || cargando ? 0.6 : 1, cursor: generandoExcel || cargando ? "not-allowed" : "pointer" }}>
+              <span className={generandoExcel ? "icon-spin" : ""}><Icon name={generandoExcel ? "refresh" : "download"} /></span>
+              {generandoExcel ? "Generando…" : "Descargar Excel"}
+            </button>
+            {errorPdf && <span style={{ fontSize: 12, color: "var(--red-fg)" }}>{errorPdf}</span>}
+            <button type="button" onClick={descargarPdf} disabled={generandoPdf || cargando} className="btn"
+              style={{ opacity: generandoPdf || cargando ? 0.6 : 1, cursor: generandoPdf || cargando ? "not-allowed" : "pointer" }}>
+              <span className={generandoPdf ? "icon-spin" : ""}><Icon name={generandoPdf ? "refresh" : "download"} /></span>
+              {generandoPdf ? "Generando…" : "Descargar PDF"}
+            </button>
+          </div>
+          <EstadoServicio servicio={servicio} desglose={desglose} onReintentar={recargar} />
         </div>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         <BarraFiltros rango={rango} setRango={setRango} filtros={filtros} setFiltros={setFiltros}
-          cargando={cargando} onRecargar={recargar} />
+          cargando={cargando} onRecargar={recargar} tecnicos={tecnicos} ventana={ventana} />
 
-        <BotonesCategoria grupoActivo={grupoActivo} onCambiar={cambiarCategoria} />
-
-        <div>
-          <p style={{ marginBottom: 10, fontSize: 12.5, color: "var(--text-3)" }}>
-            Elegí una tarjeta para ver su evolución abajo.
-          </p>
-          <div className="ind-grid">
-            {delGrupo.map((i) => (
-              <TarjetaKPI key={i.id} ind={i} d={datos[i.id]} cargando={cargando}
-                activo={i.id === seleccionado} onSelect={setSeleccionado} />
-            ))}
+        {servicio.estado === "error" ? (
+          <div className="card empty">
+            <Icon name="alert" />No hay indicadores para mostrar mientras el servicio no responda.
+            <button type="button" className="btn btn-sm" onClick={recargar}>Reintentar</button>
           </div>
-        </div>
+        ) : (
+          <>
+            <BotonesCategoria grupoActivo={grupoActivo} onCambiar={cambiarCategoria} indicadores={visibles} />
 
-        <GraficoPrincipal ind={ind} d={datos[ind.id]} cargando={cargando} graficoRef={graficoRef} />
-        <TablaTecnicos ind={ind} d={datos[ind.id]} cargando={cargando} tablaRef={tablaRef} />
+            <div>
+              <div className="ind-grid">
+                {delGrupo.map((i) => (
+                  <TarjetaKPI key={i.id} ind={i} d={datos[i.id]} cargando={cargando}
+                    activo={i.id === seleccionado} onSelect={setSeleccionado} />
+                ))}
+              </div>
+            </div>
+
+            <GraficoPrincipal ind={ind} d={datos[ind.id]} cargando={cargando} graficoRef={graficoRef} periodo={periodo} />
+            <TablaTecnicos ind={ind} d={datos[ind.id]} cargando={cargando} tablaRef={tablaRef} periodo={periodo} />
+          </>
+        )}
       </div>
     </div>
   );

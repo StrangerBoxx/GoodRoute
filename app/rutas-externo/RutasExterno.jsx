@@ -30,6 +30,7 @@ const RX_KEYS = {
   propuestaOriginal: "rutasExterno.propuestaOriginal",
   generadoEn: "rutasExterno.generadoEn",
   confirmados: "rutasExterno.confirmados",
+  inicioPlanificacion: "rutasExterno.inicioPlanificacion",
 };
 function rxLoad(key, fallback) {
   try {
@@ -39,6 +40,33 @@ function rxLoad(key, fallback) {
 }
 function rxSave(key, value) {
   try { sessionStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
+// Al pasar a GoodRoute (27/10/2026) cambiaron los ids de técnicos y OT:
+// lo que haya quedado en sessionStorage de una sesión contra el backend
+// anterior (selección, propuesta, confirmados) apuntaría a ids que ya no
+// existen, así que se descarta una sola vez. Subir RX_ORIGEN_DATOS si
+// vuelve a cambiar el backend de origen.
+const RX_ORIGEN_DATOS = "goodroute";
+try {
+  if (sessionStorage.getItem("rutasExterno.origenDatos") !== RX_ORIGEN_DATOS) {
+    Object.values(RX_KEYS).forEach(k => sessionStorage.removeItem(k));
+    sessionStorage.setItem("rutasExterno.origenDatos", RX_ORIGEN_DATOS);
+  }
+} catch {}
+
+// HU-30: inicio de la sesión de planificación, para medir cuánto toma
+// planificar una jornada (se manda como inicio_planificacion al
+// confirmar). Arranca en la PRIMERA interacción con la pantalla de
+// selección (cambiar OTs/técnicos o "Planificar Jornada"), no al solo
+// entrar — si ya hay uno registrado, no se pisa. Se descarta al volver a
+// la selección (después de confirmar o de descartar), así cada sesión
+// mide una sola planificación.
+function marcarInicioPlanificacion() {
+  if (!rxLoad(RX_KEYS.inicioPlanificacion, null)) rxSave(RX_KEYS.inicioPlanificacion, new Date().toISOString());
+}
+function descartarInicioPlanificacion() {
+  try { sessionStorage.removeItem(RX_KEYS.inicioPlanificacion); } catch {}
 }
 
 // Solo para mostrar al usuario — el resto del estado sigue en ISO (YYYY-MM-DD).
@@ -84,6 +112,14 @@ function lunesDeSemana(iso) {
 }
 // "miércoles 7 de octubre" — sin año, para que coincida con el ejemplo
 // pedido; la tira/calendario ya muestran el año en su propio rótulo.
+// ¿El técnico trabaja ese día? `disponibilidad` va de lunes (0) a domingo
+// (6); getDay() va de domingo (0) a sábado (6). Sin dato, se asume que sí.
+function disponibleEn(tecnico, iso) {
+  const d = tecnico.disponibilidad;
+  if (!Array.isArray(d) || d.length !== 7) return true;
+  return d[(fechaDesdeISO(iso).getDay() + 6) % 7] !== false;
+}
+
 function fechaLarga(iso) {
   const d = fechaDesdeISO(iso);
   return `${DIAS_LARGOS[d.getDay()]} ${d.getDate()} de ${MESES_LARGOS[d.getMonth()]}`;
@@ -106,20 +142,13 @@ function textoEstadoDia(confirmadas, porAsignar) {
   return partes.length ? partes.join(" · ") : "sin OT";
 }
 
-// Las horas que entrega el backend vienen 3 horas adelantadas respecto a
-// la hora real de Chile (dato confirmado, no un bug de acá) — esto
-// ajusta SOLO lo que se muestra en pantalla. Los cálculos internos
-// (ventanas, jornada, lo que se manda al confirmar/reprogramar) siguen
-// usando la hora cruda tal cual llega del backend, sin tocar — si se
-// ajustara ahí también, esas cuentas quedarían mal contra la jornada
-// configurada (que usa esa misma hora cruda como referencia).
+// Hasta el 27/10/2026 esto restaba 3 h: las OT venían del set propio del
+// optimizador, en UTC. Ahora vienen de GoodRoute y se pasan a hora de
+// Chile al leerlas (aHoraChile en data.js), así que todo — lo que se
+// muestra, lo que se manda al optimizador y lo que éste devuelve — ya
+// está en hora local. Queda como único punto de formato de horas.
 function horaVista(hhmm) {
-  if (!hhmm) return hhmm;
-  const [h, m] = hhmm.split(":").map(Number);
-  const total = (((h * 60 + m - 180) % 1440) + 1440) % 1440;
-  const hh = Math.floor(total / 60);
-  const mm = total % 60;
-  return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+  return hhmm;
 }
 
 // Qué OT cambiaron entre dos versiones de la propuesta (la corrida del
@@ -548,50 +577,48 @@ function TiraDias({ fecha, onSeleccionar, estadoDelDia, fechaMin, fechaMax, conR
   );
 }
 
-// Confirmación antes de cambiar de día con una propuesta sin confirmar
-// todavía en pantalla — cambiar de fecha la descarta (está ligada al día
-// que se estaba editando), así que se avisa antes en vez de perderla
-// en silencio.
-function ConfirmarCambioFechaModal({ onConfirmar, onCancelar }) {
+// Confirmación antes de salir de la verificación con una planificación
+// sin confirmar (botón "<" junto al día) — volver a la selección la
+// descarta, así que se avisa antes en vez de perderla en silencio.
+function ConfirmarDescartarModal({ fecha, esReedicion, destino = "a la selección", onConfirmar, onCancelar }) {
   return (
     <div className="overlay" onClick={onCancelar}>
       <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
         <div className="modal-head">
           <div>
-            <div className="modal-title">Cambiar de día</div>
-            <div className="modal-sub">Hay una propuesta sin confirmar para el día actual. Si cambiás de fecha, se descarta.</div>
+            <div className="modal-title">{esReedicion ? "Descartar cambios" : "Descartar planificación"}</div>
+            <div className="modal-sub">
+              {esReedicion
+                ? `Los cambios a la planificación confirmada del ${fechaLarga(fecha)} todavía no se guardaron. Si volvés ${destino}, se descartan y la planificación confirmada queda como estaba.`
+                : `La planificación del ${fechaLarga(fecha)} todavía no está confirmada. Si volvés ${destino}, se descarta.`}
+            </div>
           </div>
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={onCancelar}>Seguir editando</button>
-          <button className="btn btn-primary" onClick={onConfirmar}>Cambiar de día igual</button>
+          <button className="btn" onClick={onCancelar}>Seguir revisando</button>
+          <button className="btn btn-primary" onClick={onConfirmar}>{esReedicion ? "Descartar cambios" : "Descartar planificación"}</button>
         </div>
       </div>
     </div>
   );
 }
 
-// Cuánto tarda, estimado, cada uno de los primeros 3 pasos del panel de
-// "Optimizando planificación" — el 4º (el último) nunca se completa
-// solo, se queda activo hasta que la respuesta real llega (ver
-// PanelOptimizando). Son estimaciones nomás, no hay forma de que el
-// servicio de optimización reporte avance real. Sin mensaje de "está
-// tardando más de lo habitual": en vez de avisarlo con texto, el ritmo
-// entre paso y paso es más pausado, así que se nota menos si la
-// respuesta real se demora — el anillo girando de cada paso ya deja
-// claro que sigue trabajando, sin alargar la espera real ni un segundo
-// (si la respuesta llega antes, lo que falta se completa de golpe igual).
-const PASOS_OPTIMIZACION_DURACIONES_MS = [1600, 2800, 3200];
+// Cuánto tarda, estimado, cada uno de los 2 primeros pasos del panel de
+// "Planificando jornada". El 3º ("Asignando técnicos", el que de verdad
+// representa el trabajo del solver) es el de mayor duración: nunca se
+// completa solo, se queda activo hasta que llega la respuesta real. Ahí
+// el panel salta al último paso durante PASO_FINAL_MS y recién después
+// se pasa a la verificación (ver onOptimizar). Son estimaciones nomás,
+// el servicio de optimización no reporta avance real.
+const PASOS_OPTIMIZACION_DURACIONES_MS = [1200, 2000];
+const PASO_FINAL_MS = 500;
 
-/* ---- Panel de pasos "Optimizando planificación" (reemplaza el velo
-   oscuro + ícono de recargar girando de antes). Los pasos 1-3 avanzan
-   por tiempo ESTIMADO mientras se espera la respuesta real del
-   optimizador (que no reporta progreso, así que no hay otra forma) — el
-   4º paso se queda activo hasta que esa respuesta llega de verdad, nunca
-   se completa solo. Si la respuesta llega antes de lo estimado, lo que
-   faltaba se completa de golpe y recién ahí se cierra (sin alargar la
-   espera real ni un segundo). ---- */
-function PanelOptimizando({ abierto, totalOts, totalTecnicos, fecha, error, onReintentar, onCerrar }) {
+/* ---- Panel de pasos "Planificando jornada". Los pasos 1-2 avanzan por
+   tiempo ESTIMADO; el 3º queda activo mientras se espera la respuesta
+   del optimizador. Con `finalizando` (la respuesta ya llegó) se marcan
+   los anteriores como listos y se activa el último paso — quien lo usa
+   espera PASO_FINAL_MS y recién entonces lo cierra. ---- */
+function PanelOptimizando({ abierto, finalizando, totalOts, totalTecnicos, fecha, error, onReintentar, onCerrar }) {
   const pasos = [
     `Leyendo las ${totalOts} órdenes`,
     "Calculando distancias y tiempos",
@@ -603,49 +630,42 @@ function PanelOptimizando({ abierto, totalOts, totalTecnicos, fecha, error, onRe
   const [visible, setVisible] = useState(abierto);
   const panelRef = useRef(null);
   const disparadorRef = useRef(null);
+  const timersRef = useRef([]);
+  const limpiarTimers = () => { timersRef.current.forEach(clearTimeout); timersRef.current = []; };
 
-  // Arranca/reinicia la cuenta estimada cada vez que se abre; si se
-  // cierra sin error, remata los pasos restantes de golpe (la respuesta
-  // real ya llegó en ese momento — esto no espera nada de más, solo le
-  // da al ojo un instante para registrar que terminó antes de que la
-  // tarjeta desaparezca).
+  // Arranca/reinicia la cuenta estimada cada vez que se abre. Al cerrarse
+  // sin error (la respuesta ya llegó y ya se mostró el último paso, ver
+  // `finalizando`), la tarjeta se va de una.
   useEffect(() => {
     if (abierto) {
       disparadorRef.current = document.activeElement;
       setVisible(true);
       setPasoActivo(0);
       setCompletados([]);
-      const timers = [];
       let acumulado = 0;
       PASOS_OPTIMIZACION_DURACIONES_MS.forEach((dur, i) => {
         acumulado += dur;
-        timers.push(setTimeout(() => {
+        timersRef.current.push(setTimeout(() => {
           setCompletados(prev => (prev.includes(i) ? prev : [...prev, i]));
           setPasoActivo(i + 1);
         }, acumulado));
       });
-      return () => timers.forEach(clearTimeout);
+      return limpiarTimers;
     }
-    if (!error) {
-      setVisible(v => {
-        if (v) setCompletados([0, 1, 2, 3]);
-        return v;
-      });
-    }
+    if (!error) setVisible(false);
   }, [abierto]);
 
-  // El cierre con remate (ver arriba) espera un instante antes de
-  // desmontar la tarjeta — nunca antes de que la respuesta real haya
-  // llegado (abierto ya es false acá), así que no es una espera fingida.
+  // Llegó la respuesta: salta al último paso aunque la cuenta estimada no
+  // haya llegado todavía a "Asignando técnicos".
   useEffect(() => {
-    if (!abierto && !error && visible) {
-      const t = setTimeout(() => setVisible(false), 320);
-      return () => clearTimeout(t);
-    }
-  }, [abierto, error, visible]);
+    if (!finalizando) return;
+    limpiarTimers();
+    setCompletados(pasos.slice(0, -1).map((_, i) => i));
+    setPasoActivo(pasos.length - 1);
+  }, [finalizando]);
 
   // Foco atrapado adentro mientras está abierto (con o sin error); vuelve
-  // a quien lo disparó ("Optimizar planificación") al cerrarse.
+  // a quien lo disparó ("Planificar Jornada") al cerrarse.
   useEffect(() => {
     if (!visible) {
       disparadorRef.current?.focus?.();
@@ -665,9 +685,7 @@ function PanelOptimizando({ abierto, totalOts, totalTecnicos, fecha, error, onRe
     return () => window.removeEventListener("keydown", onKey);
   }, [visible]);
 
-  // Cierre explícito desde el botón "Cerrar" del error — de una, sin el
-  // remate de pasos ni la demora de 320ms que usa el cierre por éxito
-  // (acá no hay nada que festejar, el intento falló).
+  // Cierre explícito desde el botón "Cerrar" del error.
   const cerrarConError = () => { setVisible(false); onCerrar(); };
 
   if (!visible) return null;
@@ -677,7 +695,7 @@ function PanelOptimizando({ abierto, totalOts, totalTecnicos, fecha, error, onRe
       <div className="rx-panel-pasos" role="status" aria-live="polite" tabIndex={-1} ref={panelRef}>
         <div className="rx-panel-pasos-head">
           <span className="rx-ring rx-ring-20 rx-ring-accent" aria-hidden="true" />
-          <span className="rx-panel-pasos-titulo">Optimizando planificación</span>
+          <span className="rx-panel-pasos-titulo">Planificando jornada</span>
         </div>
         <div className="rx-panel-pasos-contexto">
           {totalOts} OT · {totalTecnicos} técnico{totalTecnicos === 1 ? "" : "s"} · {fechaLarga(fecha)}
@@ -719,7 +737,7 @@ function PanelOptimizando({ abierto, totalOts, totalTecnicos, fecha, error, onRe
 }
 
 /* ---- Panel de selección (HU-01) ---- */
-function SeleccionPanel({ fecha, otsDelDia, tecnicosDisponibles, otsSel, tecSel, toggleOt, toggleTec, onToggleTodosOts, onToggleTodosTec, onOptimizar, onAsignacionManual, optimizando, error, diaConfirmado }) {
+function SeleccionPanel({ fecha, otsDelDia, tecnicosDisponibles, otsSel, tecSel, toggleOt, toggleTec, onToggleTodosOts, onToggleTodosTec, onOptimizar, onAsignacionManual, optimizando, error }) {
   const otsCount = otsDelDia.filter(o => otsSel[o.id]).length;
   const tecCount = tecnicosDisponibles.filter(t => tecSel[t.id]).length;
   // La asignación manual no pasa por el optimizador, así que no depende
@@ -809,17 +827,15 @@ function SeleccionPanel({ fecha, otsDelDia, tecnicosDisponibles, otsSel, tecSel,
       <div className="rx-actions">
         <button className="btn btn-primary" disabled={optimizando || !puedeOptimizar} onClick={onOptimizar}>
           {optimizando ? <span className="rx-ring rx-ring-16" aria-hidden="true" /> : <Icon name="zap" />}
-          {optimizando ? "Optimizando…" : diaConfirmado ? "Volver a optimizar" : "Optimizar planificación"}
+          {optimizando ? "Planificando…" : "Planificar Jornada"}
         </button>
         <button className="btn" disabled={optimizando || !haySeleccion} onClick={onAsignacionManual}
           title="Arma la propuesta directo de la selección, sin correr el optimizador, para asignar las OT a mano">
           <Icon name="edit" />Asignación manual
         </button>
-        {(!OPTIMIZADOR_DISPONIBLE || !haySeleccion) && (
+        {!OPTIMIZADOR_DISPONIBLE && haySeleccion && (
           <span className="cell-muted" style={{ fontSize: 12.5 }}>
-            {!haySeleccion
-              ? "Selecciona al menos una OT y un técnico."
-              : "El servicio de optimización está en actualización."}
+            El servicio de optimización está en actualización.
           </span>
         )}
       </div>
@@ -1101,6 +1117,7 @@ function TecnicoRouteDetail({ tecnico, paradas, otrosTecnicos, recalculando, otI
 // causa_principal/causas[] de cada diagnóstico — ya no hace falta parsear
 // el prefijo del texto libre de "razones".
 const CAUSA_LABEL = {
+  datos: "Datos inválidos",
   georreferencia: "Georreferencia",
   sectorial: "Sector",
   temporal: "Horario",
@@ -1109,8 +1126,21 @@ const CAUSA_LABEL = {
 };
 
 /* ---- Fila de OT pendiente/no asignable, con botón "Mover" a un técnico ---- */
+// HU-23: la causa principal (con su detalle) se ve siempre, sin ninguna
+// acción extra; las causas secundarias, que solo agregan densidad, quedan
+// detrás de "+N causas más".
 function PendienteRow({ ot, tecnicos, onMover, cambiada, deshabilitado }) {
   const [menuAbierto, setMenuAbierto] = useState(false);
+  const [verCausas, setVerCausas] = useState(false);
+  const causas = ot.causas || [];
+  const principal = causas.find(c => c.categoria === ot.causaPrincipal) || causas[0] || null;
+  const secundarias = causas.filter(c => c !== principal);
+  const filaCausa = (c, i) => (
+    <div key={i} className="stop-dir" style={{ color: "var(--amber-fg)", alignItems: "flex-start" }}>
+      <Icon name="alert" style={{ width: 12, height: 12, marginTop: 2, flex: "none" }} />
+      <span><b style={{ fontWeight: 700 }}>{CAUSA_LABEL[c.categoria] || c.categoria}: </b>{c.detalle}</span>
+    </div>
+  );
   return (
     <div className="rx-check-row">
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -1121,12 +1151,13 @@ function PendienteRow({ ot, tecnicos, onMover, cambiada, deshabilitado }) {
           {cambiada && <Badge cls="b-amber" dot={false}>Editada</Badge>}
         </div>
         <div className="stop-dir"><Icon name="pin" style={{ width: 12, height: 12 }} />{ot.direccion}</div>
-        {(ot.causas || []).map((c, i) => (
-          <div key={i} className="stop-dir" style={{ color: "var(--amber-fg)", alignItems: "flex-start" }}>
-            <Icon name="alert" style={{ width: 12, height: 12, marginTop: 2, flex: "none" }} />
-            <span><b style={{ fontWeight: 700 }}>{CAUSA_LABEL[c.categoria] || c.categoria}: </b>{c.detalle}</span>
-          </div>
-        ))}
+        {principal && filaCausa(principal, "principal")}
+        {verCausas && secundarias.map(filaCausa)}
+        {secundarias.length > 0 && (
+          <button type="button" className="rx-link-btn" onClick={() => setVerCausas(v => !v)}>
+            {verCausas ? "Ocultar causas" : `+${secundarias.length} causa${secundarias.length === 1 ? "" : "s"} más`}
+          </button>
+        )}
       </div>
       <div style={{ position: "relative" }}>
         <button className="btn btn-sm" disabled={tecnicos.length === 0 || deshabilitado}
@@ -1141,19 +1172,47 @@ function PendienteRow({ ot, tecnicos, onMover, cambiada, deshabilitado }) {
   );
 }
 
-// Estado de éxito explícito de la corrida — sin esto, la propuesta
-// aparece sin contexto de qué tan bien (o mal) le fue a la optimización.
+/* ---- Encabezado de la verificación (HU-31): el día que se está
+   planificando como texto destacado (en vez de la tira de días, que acá
+   solo se prestaba a cambiar de día sin querer), con "<" a la izquierda
+   para volver a la selección (previa confirmación, ver
+   ConfirmarDescartarModal) y, debajo, los datos de la corrida. ---- */
+function EncabezadoVerificacion({ fecha, resumen, pendientesCount, deshabilitado, onVolver, tituloVolver = "Volver a la selección" }) {
+  // Contador EN VIVO de pendientes (cambia al mover OT a mano, a
+  // diferencia del resumen de la corrida) — siempre a la vista, y lleva
+  // directo al panel Pendientes, que queda al final de la pantalla.
+  const irAPendientes = () => document.getElementById("rx-pendientes")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  return (
+    <div className="rx-verif-head">
+      <button type="button" className="rx-tira-nav-btn rx-verif-volver" aria-label={tituloVolver}
+        title={tituloVolver} disabled={deshabilitado} onClick={onVolver}>
+        <Icon name="chevR" style={{ transform: "rotate(180deg)" }} />
+      </button>
+      <div style={{ minWidth: 0 }}>
+        <div className="rx-verif-dia">{fechaLargaConAnio(fecha)}</div>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: 18, rowGap: 6, marginTop: 4 }}>
+          <button type="button" className={"badge rx-pendientes-chip " + (pendientesCount > 0 ? "b-amber" : "b-green")} onClick={irAPendientes}
+            title="Ir al panel Pendientes">
+            <Icon name={pendientesCount > 0 ? "alert" : "checkC"} />
+            {pendientesCount > 0 ? `${pendientesCount} OT pendiente${pendientesCount === 1 ? "" : "s"}` : "Sin pendientes"}
+          </button>
+          <ResumenCorrida resumen={resumen} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Datos de la corrida, bajo el día — sin esto, la propuesta aparece sin
+// contexto de qué tan bien (o mal) le fue a la optimización. Los
+// pendientes no van acá: los cuenta en vivo el chip de al lado.
 function ResumenCorrida({ resumen }) {
   if (!resumen) return null;
   const matrizFallback = resumen.fuenteMatriz && resumen.fuenteMatriz !== "osrm";
   return (
-    <div className="card card-pad" style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 18 }}>
-      <div className="row-flex" style={{ gap: 8, flex: "none" }}>
-        <Icon name="checkC" style={{ color: "var(--green-fg)" }} />
-        <b>Optimización lista</b>
-      </div>
+    <>
       <span className="cell-muted" style={{ fontSize: 12.5 }}>
-        <b style={{ color: "var(--text)" }}>{resumen.totalOts}</b> OT · <b style={{ color: "var(--text)" }}>{resumen.otsAsignadas}</b> asignadas · <b style={{ color: "var(--text)" }}>{resumen.otsPendientes}</b> pendientes
+        <b style={{ color: "var(--text)" }}>{resumen.totalOts}</b> OT · <b style={{ color: "var(--text)" }}>{resumen.otsAsignadas}</b> asignadas por el optimizador
       </span>
       <span className="cell-muted" style={{ fontSize: 12.5 }}>
         <b style={{ color: "var(--text)" }}>{resumen.tecnicosUtilizados}</b> de {resumen.totalTecnicos} técnicos usados
@@ -1161,25 +1220,17 @@ function ResumenCorrida({ resumen }) {
       {resumen.distanciaTotalKm != null && (
         <span className="cell-muted" style={{ fontSize: 12.5 }}>{resumen.distanciaTotalKm.toFixed(1)} km totales</span>
       )}
-      {resumen.otsPendientes > 0 && resumen.pendientesPorCausa && (
-        <span className="cell-muted" style={{ fontSize: 12.5 }}>
-          {Object.entries(resumen.pendientesPorCausa)
-            .filter(([, n]) => n > 0)
-            .map(([causa, n]) => `${n} por ${CAUSA_LABEL[causa] || causa}`)
-            .join(" · ")}
-        </span>
-      )}
       {matrizFallback && (
-        <span className="badge b-amber" style={{ marginLeft: "auto" }}>
+        <span className="badge b-amber">
           <Icon name="alert" />Distancias estimadas (sin ruteo real disponible)
         </span>
       )}
-    </div>
+    </>
   );
 }
 
 /* ---- Panel de propuesta + edición + confirmación (HU-02/HU-03) ---- */
-function PropuestaPanel({ propuesta, propuestaOriginal, resumen, error, recalculando, erroresTecnico, confirmando, onMoveUp, onMoveDown, onMover, onEliminar, onMoverPendiente, onVolver, onConfirmar, onRestablecerRuta, esReedicion, motivosPorOt, confirmadoPrevioPorTecnico }) {
+function PropuestaPanel({ propuesta, propuestaOriginal, error, recalculando, erroresTecnico, confirmando, onMoveUp, onMoveDown, onMover, onEliminar, onMoverPendiente, onConfirmar, onRestablecerRuta, esReedicion, motivosPorOt, confirmadoPrevioPorTecnico }) {
   // Cuánto lleva YA cada técnico contando TAMBIÉN lo que quedó confirmado
   // en una ronda anterior de este mismo día (ej. el optimizador dejó 13
   // asignadas y ahora se están asignando a mano las 5 que quedaron
@@ -1221,8 +1272,8 @@ function PropuestaPanel({ propuesta, propuestaOriginal, resumen, error, recalcul
   // reprogramación guardado (se pide con un popup apenas se edita cada
   // una — esto es solo para avisar si quedó alguna sin responder).
   // Si CUALQUIER técnico está recalculando ahora mismo, se frena también
-  // "Asignar"/"Volver a selección" y el "Mover" de Pendientes — confirmar
-  // o salir mientras una actualización sigue en vuelo podría guardar
+  // "Confirmar" y el "Mover" de Pendientes (y el "<" del encabezado, ver
+  // RutasExternoScreen) — confirmar o salir mientras una actualización sigue en vuelo podría guardar
   // números todavía no recalculados, o pisar esa edición con una nueva
   // antes de que la anterior termine (mismo motivo por el que se
   // deshabilitan los controles de la ruta propia en TecnicoRouteDetail).
@@ -1261,8 +1312,6 @@ function PropuestaPanel({ propuesta, propuestaOriginal, resumen, error, recalcul
 
   return (
     <>
-      <ResumenCorrida resumen={resumen} />
-
       {error && (
         <div className="card" style={{ borderColor: "var(--red-fg)", background: "var(--accent-softer)", display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", marginBottom: 16 }}>
           <Icon name="alert" style={{ width: 18, height: 18, color: "var(--red-fg)", flex: "none" }} />
@@ -1303,10 +1352,17 @@ function PropuestaPanel({ propuesta, propuestaOriginal, resumen, error, recalcul
         </div>
       )}
 
-      <div className="card card-pad" style={{ marginTop: 16 }}>
+      {/* HU-23: ubicación fija (siempre se muestra, aunque esté vacío) y
+          distinguible del resto — borde y contador ámbar cuando quedan OT
+          sin asignar. El encabezado de la verificación lleva un acceso
+          directo acá (ver EncabezadoVerificacion). */}
+      <div id="rx-pendientes" className={"card card-pad rx-pendientes" + (propuesta.pendientes.length > 0 ? " con-pendientes" : "")} style={{ marginTop: 16 }}>
         <div className="rx-card-head">
-          <div className="rx-card-title">Pendientes</div>
-          <span className="rx-card-count">{propuesta.pendientes.length}</span>
+          <div className="rx-card-title row-flex" style={{ gap: 7 }}>
+            <Icon name={propuesta.pendientes.length > 0 ? "alert" : "checkC"} style={{ width: 16, height: 16, color: propuesta.pendientes.length > 0 ? "var(--amber-fg)" : "var(--green-fg)" }} />
+            Pendientes
+          </div>
+          <Badge cls={propuesta.pendientes.length > 0 ? "b-amber" : "b-green"} dot={false}>{propuesta.pendientes.length}</Badge>
         </div>
         {propuesta.pendientes.length === 0 ? (
           <div className="card empty"><Icon name="checkC" />No quedaron OTs pendientes.</div>
@@ -1321,15 +1377,14 @@ function PropuestaPanel({ propuesta, propuestaOriginal, resumen, error, recalcul
         )}
       </div>
 
-      <div className="rx-actions">
-        <button className="btn" onClick={onVolver} disabled={confirmando || hayRecalculando}><Icon name="arrowL" />Volver a selección</button>
+      <div className="rx-actions" style={{ justifyContent: "flex-end", marginTop: 16 }}>
         {esReedicion && otsFaltanMotivo > 0 && (
-          <span className="cell-muted" style={{ fontSize: 12.5, marginLeft: "auto", color: "var(--amber-fg)" }}>
+          <span className="cell-muted" style={{ fontSize: 12.5, color: "var(--amber-fg)" }}>
             <Icon name="alert" style={{ width: 13, height: 13 }} />{" "}
             Falta el motivo de {otsFaltanMotivo} OT.
           </span>
         )}
-        <button className="btn btn-primary" onClick={onConfirmar} disabled={confirmando || hayRecalculando || (esReedicion && otsFaltanMotivo > 0)} style={esReedicion && otsFaltanMotivo === 0 ? { marginLeft: "auto" } : undefined}>
+        <button className="btn btn-primary" onClick={onConfirmar} disabled={confirmando || hayRecalculando || (esReedicion && otsFaltanMotivo > 0)}>
           {confirmando ? <span className="rx-ring" aria-hidden="true" /> : <Icon name="check" />}
           {esReedicion
             ? (confirmando ? "Confirmando cambios…" : "Confirmar cambios")
@@ -1396,7 +1451,20 @@ function MapaRuta({ base, paradas, geometria }) {
     return () => map.remove();
   }, []);
 
-  return <div ref={divRef} className="ruta-mapa" />;
+  // HU-23: leyenda fija bajo el mapa — los colores de inicio/fin y la "B"
+  // de la base no se explicaban en ningún lado (solo en el tooltip de cada
+  // pin, que hay que descubrir pasando el mouse).
+  return (
+    <>
+      <div ref={divRef} className="ruta-mapa" />
+      <div className="mapa-leyenda">
+        {base && <span><i className="map-pin map-pin-base">B</i>Base del técnico</span>}
+        <span><i className="map-pin map-pin-start" />Inicio</span>
+        <span><i className="map-pin">n</i>Parada en orden</span>
+        <span><i className="map-pin map-pin-end" />Destino final</span>
+      </div>
+    </>
+  );
 }
 
 // Fila de una ruta ya registrada en el backend (HU-18, "consultar sin
@@ -1420,6 +1488,9 @@ function RegistroRutaCard({ ruta }) {
     ? { lat: ruta.base_latitud, lng: ruta.base_longitud } : null;
 
   const [mapa, setMapa] = useState({ abierto: false, estado: "inicial", geometria: null, error: null });
+  // Las paradas se ven de entrada; la flecha las pliega para dejar solo el
+  // resumen de la ruta (técnico, horario, km, cantidad de OT).
+  const [detalleAbierto, setDetalleAbierto] = useState(true);
 
   const verEnMapa = async () => {
     if (mapa.abierto) { setMapa(m => ({ ...m, abierto: false })); return; }
@@ -1442,11 +1513,6 @@ function RegistroRutaCard({ ruta }) {
           <div className="cell-strong">{nombre}</div>
           {zona && <div className="route-zone"><Icon name="pin" style={{ width: 12, height: 12 }} />{zona}</div>}
         </div>
-        {paradas.length > 0 && (
-          <button type="button" className="btn btn-sm" onClick={verEnMapa}>
-            <Icon name="pin" style={{ width: 14, height: 14 }} />{mapa.abierto ? "Ocultar mapa" : "Ver en mapa"}
-          </button>
-        )}
         {paradas.length === 1 && paradas[0].horaProgramada && (
           <span className="cell-muted" style={{ fontSize: 12.5, flex: "none" }}>
             <Icon name="clock" style={{ width: 12, height: 12 }} />{" "}{horaVista(paradas[0].horaProgramada)}
@@ -1463,17 +1529,36 @@ function RegistroRutaCard({ ruta }) {
           <span className="cell-muted" style={{ fontSize: 12.5, flex: "none" }}>{ruta.distancia_total_km.toFixed(1)} km</span>
         )}
         <div className="route-count"><b>{paradas.length}</b> OT</div>
+        {paradas.length > 0 && (
+          <button type="button" className="btn btn-sm" aria-expanded={detalleAbierto}
+            aria-label={detalleAbierto ? "Ocultar detalle" : "Ver detalle"} title={detalleAbierto ? "Ocultar detalle" : "Ver detalle"}
+            onClick={() => setDetalleAbierto(v => !v)}>
+            <Icon name="chevR" style={{ width: 12, height: 12, transform: detalleAbierto ? "rotate(-90deg)" : "rotate(90deg)" }} />
+          </button>
+        )}
       </div>
-      {paradas.length > 0 && (
-        <div style={{ padding: "10px 16px 14px", display: "flex", flexWrap: "wrap", gap: 7 }}>
-          {paradas.map((p, i) => (
-            <span key={p.id || i} className="badge b-slate">
-              {p.id}{p.horaProgramada ? ` · ${horaVista(p.horaProgramada)}` : ""}
-            </span>
-          ))}
-        </div>
+      {detalleAbierto && paradas.length > 0 && (
+        <>
+          <div className="route-stops">
+            {paradas.map((p, i) => (
+              <div key={p.id || i} className="route-stop" style={{ padding: "8px 16px" }}>
+                <div className="stop-n">{i + 1}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span className="id-pill">{p.id}</span>
+                  {p.direccion && <div className="stop-dir"><Icon name="pin" style={{ width: 12, height: 12 }} />{direccionParada(p.direccion, zona)}</div>}
+                </div>
+                {p.horaProgramada && <span className="badge b-slate" style={{ flex: "none" }}><Icon name="clock" />{horaVista(p.horaProgramada)}</span>}
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: "4px 16px 14px" }}>
+            <button type="button" className="btn btn-sm" onClick={verEnMapa}>
+              <Icon name="pin" style={{ width: 14, height: 14 }} />{mapa.abierto ? "Ocultar mapa" : "Ver en mapa"}
+            </button>
+          </div>
+        </>
       )}
-      {mapa.abierto && (
+      {detalleAbierto && mapa.abierto && (
         <div style={{ padding: "0 16px 16px" }}>
           {mapa.estado === "cargando" && (
             <div className="cell-muted" style={{ fontSize: 12.5, padding: "14px 0", display: "flex", alignItems: "center", gap: 7 }}>
@@ -1496,8 +1581,7 @@ function RegistroRutaCard({ ruta }) {
 // sumar una llamada de red en cada visita cuando normalmente no hay nada
 // que ver todavía). HU-18 criterio 3 y 4: consultable sin salir de acá,
 // y un error de red se comunica, no se confunde con "no hay registros".
-function RegistroAsignaciones({ fechaInicial, go }) {
-  const [fechaConsulta, setFechaConsulta] = useState(fechaInicial);
+function RegistroAsignaciones({ fechaConsulta, setFechaConsulta, go }) {
   const [estado, setEstado] = useState("cargando"); // cargando | ok | error
   const [rutas, setRutas] = useState([]);
   const [error, setError] = useState(null);
@@ -1603,16 +1687,19 @@ function RegistroAsignaciones({ fechaInicial, go }) {
 /* ---- Pantalla propia para consultar las rutas ya confirmadas (antes
    vivía inline arriba de "Planificar rutas"; ahora es una pantalla
    aparte, a la que se entra con el botón "Rutas confirmadas") ---- */
-function RegistroAsignacionesScreen({ go }) {
+// Abre en el día que se estaba viendo en "Planificar rutas" (params.fecha;
+// sin fecha, en hoy) y al volver le devuelve el día que quedó elegido acá.
+function RegistroAsignacionesScreen({ go, fecha }) {
+  const [fechaConsulta, setFechaConsulta] = useState(fecha || window.RUTAS_EXTERNO_API.hoyISO());
   return (
     <div className="page fade-in">
-      <a className="back-link back-link-accent" onClick={() => go("rutasExterno")}><Icon name="arrowL" />Volver a planificar rutas</a>
+      <a className="back-link back-link-accent" onClick={() => go("rutasExterno", { fecha: fechaConsulta })}><Icon name="arrowL" />Volver a planificar rutas</a>
       <div className="page-head">
         <div>
           <div className="page-title">Rutas confirmadas</div>
         </div>
       </div>
-      <RegistroAsignaciones fechaInicial={window.RUTAS_EXTERNO_API.hoyISO()} go={go} />
+      <RegistroAsignaciones fechaConsulta={fechaConsulta} setFechaConsulta={setFechaConsulta} go={go} />
     </div>
   );
 }
@@ -1650,19 +1737,27 @@ function fusionarPorTecnico(previo, nuevo) {
 function RutasExternoScreen({ onToast, go, route }) {
   // Día que se está planificando — no tiene que ser forzosamente "hoy"
   // (el selector permite hasta 13 días hacia adelante). Se persiste para
-  // no perderlo si solo cambiaste de pantalla.
-  const [fecha, setFecha] = useState(() => rxLoad(RX_KEYS.fecha, null) || window.RUTAS_EXTERNO_API.hoyISO());
+  // no perderlo si solo cambiaste de pantalla. Al volver de "Rutas
+  // confirmadas" llega el día que se miraba ahí (params.fecha) y se usa si
+  // cae en el rango planificable; si es un día pasado, queda el de antes.
+  const [fecha, setFecha] = useState(() => {
+    const api = window.RUTAS_EXTERNO_API;
+    const desdeRegistro = route?.params?.fecha;
+    if (desdeRegistro && desdeRegistro >= api.hoyISO() && desdeRegistro <= api.sumarDiasISO(13)) return desdeRegistro;
+    return rxLoad(RX_KEYS.fecha, null) || api.hoyISO();
+  });
   // Rango navegable en la tira/calendario — igual al que ya tenía el
   // selector de fecha anterior (hoy .. hoy+13).
   const fechaMin = window.RUTAS_EXTERNO_API.hoyISO();
   const fechaMax = window.RUTAS_EXTERNO_API.sumarDiasISO(13);
-  // Fecha a la que se quiere saltar, pendiente de que se confirme el
-  // aviso de "se va a perder la propuesta sin confirmar" (ver
-  // onSeleccionarFecha/ConfirmarCambioFechaModal más abajo).
-  const [fechaPendienteCambio, setFechaPendienteCambio] = useState(null);
+  // Aviso de "se va a descartar la planificación" abierto (botón "<" de
+  // la verificación, ver onPedirVolver/ConfirmarDescartarModal).
+  const [confirmandoDescarte, setConfirmandoDescarte] = useState(false);
 
   // HU-01: técnicos y OT elegibles (por_asignar), ambos desde el backend real.
-  const [tecnicosDisponibles, setTecnicosDisponibles] = useState([]);
+  // Todos los técnicos activos de GoodRoute; los que se ofrecen son los
+  // disponibles el día elegido (tecnicosDisponibles, más abajo).
+  const [tecnicosTodos, setTecnicosTodos] = useState([]);
   const [otsDelDiaCrudo, setOtsDelDiaCrudo] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState(null);
@@ -1758,6 +1853,9 @@ function RutasExternoScreen({ onToast, go, route }) {
 
   const [error, setError] = useState(null);
   const [optimizando, setOptimizando] = useState(false);
+  // La respuesta del optimizador ya llegó y el panel de pasos muestra el
+  // último paso un instante antes de pasar a la verificación (HU-31).
+  const [finalizandoOptimizacion, setFinalizandoOptimizacion] = useState(false);
   // Error propio del panel de pasos de "Optimizando planificación" — por
   // separado del `error` genérico de arriba, que PanelOptimizando ya no
   // usa (el panel lo muestra él mismo, ahí no tiene sentido mostrarlo
@@ -1799,6 +1897,14 @@ function RutasExternoScreen({ onToast, go, route }) {
     });
     return ids;
   }, [confirmados]);
+  // Técnicos disponibles el día elegido: GoodRoute trae `disponibilidad`
+  // (lunes a domingo) y el optimizador, al recibirlos en el body, los
+  // asume disponibles — así que el filtro tiene que hacerse acá.
+  const tecnicosDisponibles = useMemo(
+    () => tecnicosTodos.filter(t => t.activo !== false && disponibleEn(t, fecha)),
+    [tecnicosTodos, fecha]
+  );
+
   // Filtradas también por fecha_programada: antes se mostraban las
   // mismas OT sin importar el día elegido (ver nota más abajo, en el
   // efecto que las carga) — ahora que la tira de días es el contexto de
@@ -1826,7 +1932,7 @@ function RutasExternoScreen({ onToast, go, route }) {
   useEffect(() => {
     if (!OPTIMIZADOR_DISPONIBLE) {
       setCargando(false);
-      setTecnicosDisponibles([]);
+      setTecnicosTodos([]);
       setOtsDelDiaCrudo([]);
       return;
     }
@@ -1839,7 +1945,7 @@ function RutasExternoScreen({ onToast, go, route }) {
     ])
       .then(([tecnicos, ots]) => {
         if (!activo) return;
-        setTecnicosDisponibles(tecnicos);
+        setTecnicosTodos(tecnicos);
         setOtsDelDiaCrudo(ots);
         const storedTec = rxLoad(RX_KEYS.tecSel, {});
         setTecSel(Object.fromEntries(tecnicos.map(t => [t.id, t.id in storedTec ? storedTec[t.id] : true])));
@@ -1872,6 +1978,16 @@ function RutasExternoScreen({ onToast, go, route }) {
     });
   }, [otsDelDia]);
 
+  // HU-30: si al entrar quedó una propuesta guardada, la planificadora
+  // salió del módulo a mitad de una verificación — como la etapa no se
+  // persiste, se vuelve a la selección y esa planificación queda
+  // abandonada, así que su inicio también se descarta (si no, la próxima
+  // sesión mediría dos planificaciones).
+  useEffect(() => {
+    if (propuesta) descartarInicioPlanificacion();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => rxSave(RX_KEYS.fecha, fecha), [fecha]);
   useEffect(() => rxSave(RX_KEYS.otsSel, otsSel), [otsSel]);
   useEffect(() => rxSave(RX_KEYS.tecSel, tecSel), [tecSel]);
@@ -1880,10 +1996,12 @@ function RutasExternoScreen({ onToast, go, route }) {
   useEffect(() => rxSave(RX_KEYS.generadoEn, generadoEn), [generadoEn]);
   useEffect(() => rxSave(RX_KEYS.confirmados, confirmados), [confirmados]);
 
-  const toggleOt = id => setOtsSel(prev => ({ ...prev, [id]: !prev[id] }));
-  const toggleTec = id => setTecSel(prev => ({ ...prev, [id]: !prev[id] }));
-  const setTodosOts = valor => setOtsSel(Object.fromEntries(otsDelDia.map(o => [o.id, valor])));
-  const setTodosTec = valor => setTecSel(Object.fromEntries(tecnicosDisponibles.map(t => [t.id, valor])));
+  // Cualquier cambio en la selección cuenta como primera interacción de
+  // la sesión de planificación (HU-30, ver marcarInicioPlanificacion).
+  const toggleOt = id => { marcarInicioPlanificacion(); setOtsSel(prev => ({ ...prev, [id]: !prev[id] })); };
+  const toggleTec = id => { marcarInicioPlanificacion(); setTecSel(prev => ({ ...prev, [id]: !prev[id] })); };
+  const setTodosOts = valor => { marcarInicioPlanificacion(); setOtsSel(Object.fromEntries(otsDelDia.map(o => [o.id, valor]))); };
+  const setTodosTec = valor => { marcarInicioPlanificacion(); setTecSel(Object.fromEntries(tecnicosDisponibles.map(t => [t.id, valor]))); };
   // Reabre el plan confirmado de ese día en el panel de edición (mismas
   // acciones de HU-03: reordenar/mover/eliminar). Si se vuelve a confirmar,
   // reemplaza por completo la confirmación anterior de ese día; si se
@@ -1892,6 +2010,10 @@ function RutasExternoScreen({ onToast, go, route }) {
   const onEditarConfirmado = (fechaConfirmado) => {
     const c = confirmados[fechaConfirmado];
     if (!c) return;
+    // Abrir un plan confirmado para editarlo también inicia la sesión de
+    // planificación (HU-30) — la reprogramación manda inicio_planificacion
+    // en cada PATCH.
+    marcarInicioPlanificacion();
     setFecha(fechaConfirmado);
     setPropuesta({ porTecnico: deepClone(c.porTecnico), pendientes: [] });
     // Punto de partida para esta sesión de edición: lo que ya estaba
@@ -1915,8 +2037,14 @@ function RutasExternoScreen({ onToast, go, route }) {
   // cómo reabrir un plan confirmado. Depende solo de editarFecha, así que
   // no se vuelve a disparar si después se "vuelve a selección" sin salir
   // de esta pantalla.
+  // Si la edición se abrió desde ahí, el "<" de la verificación vuelve a
+  // "Rutas confirmadas" (en ese mismo día) en vez de a la selección.
+  const [vieneDeRegistro, setVieneDeRegistro] = useState(false);
   useEffect(() => {
-    if (route?.params?.editarFecha) onEditarConfirmado(route.params.editarFecha);
+    if (route?.params?.editarFecha) {
+      onEditarConfirmado(route.params.editarFecha);
+      setVieneDeRegistro(true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params?.editarFecha]);
 
@@ -1928,6 +2056,7 @@ function RutasExternoScreen({ onToast, go, route }) {
   // ninguna consulta extra después de ejecutar.
   const onOptimizar = async () => {
     if (!OPTIMIZADOR_DISPONIBLE) return;
+    marcarInicioPlanificacion();
     const tecnicosSeleccionados = tecnicosDisponibles.filter(t => tecSel[t.id]);
     const otsSeleccionadas = otsDelDia.filter(o => otsSel[o.id]);
     if (!tecnicosSeleccionados.length || !otsSeleccionadas.length) {
@@ -1937,12 +2066,16 @@ function RutasExternoScreen({ onToast, go, route }) {
 
     setContextoOptimizando({ totalOts: otsSeleccionadas.length, totalTecnicos: tecnicosSeleccionados.length, fecha });
     setErrorOptimizando(null);
+    setFinalizandoOptimizacion(false);
     setOptimizando(true);
     setError(null);
     try {
       const tecnicosPayload = tecnicosSeleccionados.map(t => ({ id: t.id, nombre: t.nombre, tipo: t.tipo, zona: t.zona }));
       const ordenesPayload = otsSeleccionadas.map(o => {
+        // `comuna` aparte además de dentro de la dirección: el optimizador
+        // la usa para validar el geocoding (sugerencia del equipo, v3.1.0).
         const item = { id: o.id, tipo: o.tipo, direccion_instalacion: o.direccion };
+        if (o.comuna) item.comuna = o.comuna;
         if (o.horaProgramada) item.hora_programada = o.horaProgramada;
         return item;
       });
@@ -1960,6 +2093,9 @@ function RutasExternoScreen({ onToast, go, route }) {
       }
 
       const { TIPO_OT_LABEL, sumarMinutos, colorPorId } = window.RUTAS_EXTERNO_API;
+      const tol = window.RUTAS_EXTERNO_OPTIMIZER.toleranciasVentana(configNegocio);
+      const hh = h => String(h).padStart(2, "0") + ":00";
+      const finesJornada = { inicio: hh(configNegocio?.inicio_jornada_horas ?? 8), fin: hh(configNegocio?.fin_jornada_horas ?? 18) };
       const porTecnico = {};
       (resultado.rutas || []).forEach(ruta => {
         porTecnico[ruta.tecnico_id] = {
@@ -1969,7 +2105,9 @@ function RutasExternoScreen({ onToast, go, route }) {
             // Totales de la ruta (ya calculados por el backend con ruteo
             // real) — se muestran en la cabecera de la tarjeta de ruta.
             resumen: {
-              horaSalidaBase: ruta.hora_salida_base, horaRetornoBase: ruta.hora_retorno_base,
+              // v3.1.0: rutas abiertas, termina en la última OT (hora_fin_ruta);
+              // v3.0.0 todavía devolvía hora_retorno_base.
+              horaSalidaBase: ruta.hora_salida_base, horaFinRuta: ruta.hora_fin_ruta ?? ruta.hora_retorno_base ?? null,
               distanciaTotalKm: ruta.distancia_total_km, capacidadUso: ruta.capacidad_uso,
               esperaTotalMin: ruta.tiempo_espera_total_min,
             },
@@ -1981,8 +2119,10 @@ function RutasExternoScreen({ onToast, go, route }) {
             direccion: p.direccion,
             lat: p.latitud,
             lng: p.longitud,
-            ventanaInicio: p.hora_programada ? sumarMinutos(p.hora_programada, -30) : "08:00",
-            ventanaFin: p.hora_programada ? sumarMinutos(p.hora_programada, 30) : "18:00",
+            // Misma ventana que usó el optimizador (R4): hora − tolerancia
+            // antes / hora + tolerancia después, de la configuración vigente.
+            ventanaInicio: p.hora_programada ? sumarMinutos(p.hora_programada, -tol.antes) : finesJornada.inicio,
+            ventanaFin: p.hora_programada ? sumarMinutos(p.hora_programada, tol.despues) : finesJornada.fin,
             // Hora programada real de la OT (fija) — distinta de la
             // estimada de llegada, que puede caer hasta 30 min antes
             // (ventana de tolerancia) y confunde si se muestra sola.
@@ -1991,6 +2131,9 @@ function RutasExternoScreen({ onToast, go, route }) {
             // ruteo real; se muestra en cada parada de la tarjeta de ruta.
             horaEstimadaLlegada: p.hora_estimada_llegada,
             esperaMin: p.espera_min || 0,
+            // Tal cual lo entrega el optimizador — se reenvía sin tocar al
+            // confirmar (HU-30), aunque la OT se mueva/reordene a mano.
+            kilometrajeEstimado: p.kilometraje_estimado ?? null,
           })),
         };
       });
@@ -2011,6 +2154,11 @@ function RutasExternoScreen({ onToast, go, route }) {
         };
       });
 
+      // Respuesta lista: el panel salta al último paso un instante y recién
+      // después se pasa a la verificación.
+      setFinalizandoOptimizacion(true);
+      await new Promise(res => setTimeout(res, PASO_FINAL_MS));
+
       const r = resultado.resumen || {};
       setResumen({
         totalOts: r.total_ots, otsAsignadas: r.ots_asignadas, otsPendientes: r.ots_pendientes,
@@ -2023,7 +2171,9 @@ function RutasExternoScreen({ onToast, go, route }) {
       // al confirmar (ver aplicarYRecalcular arriba ya editó `propuesta`
       // en cuanto la coordinadora mueva algo — esto queda fijo).
       setPropuestaOriginal({ porTecnico: deepClone(porTecnico), pendientes: deepClone(pendientes) });
-      setGeneradoEn(new Date().toISOString());
+      // generado_en del POST = cuándo el optimizador generó la propuesta
+      // (v3.1.0 lo informa en timestamp_asignacion_utc).
+      setGeneradoEn(resultado.timestamp_asignacion_utc || new Date().toISOString());
       setEsReedicion(false); // primera corrida: todavía no se está reprogramando nada
       setMotivosPorOt({});
       setOtPidiendoMotivo(null);
@@ -2032,6 +2182,7 @@ function RutasExternoScreen({ onToast, go, route }) {
       setErrorOptimizando(`No se pudo optimizar: ${err.message}`);
     } finally {
       setOptimizando(false);
+      setFinalizandoOptimizacion(false);
     }
   };
 
@@ -2054,6 +2205,7 @@ function RutasExternoScreen({ onToast, go, route }) {
       setError("Selecciona al menos una OT y un técnico para asignar manualmente.");
       return;
     }
+    marcarInicioPlanificacion();
 
     const { TIPO_OT_LABEL, colorPorId } = window.RUTAS_EXTERNO_API;
     const porTecnico = {};
@@ -2326,29 +2478,32 @@ function RutasExternoScreen({ onToast, go, route }) {
     })();
   };
 
+  // Descarta la propuesta en pantalla y vuelve a la selección (o a "Rutas
+  // confirmadas", si la edición se abrió desde ahí) — también cierra la
+  // sesión de planificación (HU-30).
   const onVolver = () => {
     setPropuesta(null); setPropuestaOriginal(null); setGeneradoEn(null); setResumen(null); setError(null);
     setEsReedicion(false); setMotivosPorOt({}); setOtPidiendoMotivo(null);
+    descartarInicioPlanificacion();
     setEtapa("seleccion");
+    if (vieneDeRegistro) {
+      setVieneDeRegistro(false);
+      go("rutasExternoRegistro", { fecha });
+    }
+  };
+  // "<" de la verificación: pide confirmar antes de descartar. Al
+  // reeditar un plan confirmado sin haber cambiado nada no hay nada que
+  // perder, así que vuelve directo.
+  const onPedirVolver = () => {
+    if (esReedicion && calcularOtIdsCambiados(propuesta, propuestaOriginal).size === 0) { onVolver(); return; }
+    setConfirmandoDescarte(true);
   };
 
-  // Cambia de día de verdad: descarta cualquier propuesta sin confirmar
-  // (está ligada al día que se estaba editando, no tiene sentido
-  // arrastrarla a otro) y vuelve a la etapa de selección para que se
-  // carguen las OT/técnicos del nuevo día.
-  const cambiarFecha = iso => {
-    setFecha(iso);
-    setPropuesta(null); setPropuestaOriginal(null); setGeneradoEn(null); setResumen(null); setError(null);
-    setEsReedicion(false); setMotivosPorOt({}); setOtPidiendoMotivo(null);
-    setEtapa("seleccion");
-  };
-  // Disparado desde la tira de días o el calendario — si hay una
-  // propuesta sin confirmar en pantalla, avisa antes de perderla
-  // (ConfirmarCambioFechaModal); si no, cambia directo.
+  // La tira de días solo se muestra en la selección (en la verificación
+  // el día queda fijo, ver EncabezadoVerificacion), así que cambiar de
+  // día nunca descarta una propuesta en pantalla.
   const onSeleccionarFecha = iso => {
-    if (iso === fecha) return;
-    if (etapa === "propuesta" && propuesta) { setFechaPendienteCambio(iso); return; }
-    cambiarFecha(iso);
+    if (iso !== fecha) setFecha(iso);
   };
 
   // Arma el JSON que espera POST /asignar-tecnicos (equipo de base de
@@ -2378,7 +2533,11 @@ function RutasExternoScreen({ onToast, go, route }) {
         const modificaciones = [];
         if (!aceptadaSinModificacion) {
           if (mismoSet) {
-            modificaciones.push({ tipo: "reordenada" });
+            // Una entrada por OT que cambió de posición, con su ot_id —
+            // GoodRoute arma tipo_modificacion por OT a partir de esto.
+            idsFinal.forEach((id, i) => {
+              if (idsOriginal[i] !== id) modificaciones.push({ tipo: "reordenada", ot_id: id });
+            });
           } else {
             idsFinal.filter(id => !idsOriginal.includes(id)).forEach(id => {
               modificaciones.push({ tipo: "ot_agregada", ot_id: id, origen: ubicacionOriginal[id] || "nueva" });
@@ -2399,7 +2558,8 @@ function RutasExternoScreen({ onToast, go, route }) {
           distancia_total_km: r.distanciaTotalKm ?? 0,
           capacidad_uso: r.capacidadUso || `${paradas.length}/?`,
           hora_salida_base: r.horaSalidaBase || "",
-          hora_retorno_base: r.horaRetornoBase || "",
+          // Rutas abiertas: no hay regreso a la base (campo opcional en GoodRoute).
+          hora_retorno_base: null,
           ruta_propuesta: idsOriginal,
           ruta_final: idsFinal,
           aceptada_sin_modificacion: aceptadaSinModificacion,
@@ -2407,6 +2567,7 @@ function RutasExternoScreen({ onToast, go, route }) {
           paradas: paradas.map((p, i) => ({
             ot_id: p.id, secuencia: i + 1, tipo: p.tipo, direccion: p.direccion,
             hora_estimada_llegada: p.horaEstimadaLlegada || "", espera_min: p.esperaMin || 0,
+            kilometraje_estimado: p.kilometrajeEstimado ?? null,
           })),
         };
       });
@@ -2458,6 +2619,9 @@ function RutasExternoScreen({ onToast, go, route }) {
 
     return {
       fecha_planificacion: fecha,
+      // HU-30: cuándo empezó esta sesión de planificación (null si por lo
+      // que sea no quedó registrado, ej. sessionStorage bloqueado).
+      inicio_planificacion: rxLoad(RX_KEYS.inicioPlanificacion, null),
       generado_en: generadoEn || new Date().toISOString(),
       revisado_en: new Date().toISOString(),
       revisado_por: { usuario_id: u.id, nombre: u.nombre, rol: u.rol },
@@ -2531,7 +2695,9 @@ function RutasExternoScreen({ onToast, go, route }) {
             const tipoModificacion = !tecnicoId
               ? "OT descartada"
               : tecnicoOriginalDe[otId] !== tecnicoId ? "OT asignada a otro técnico" : "OT reordenada";
-            return window.RUTAS_EXTERNO_API.patchTecnicoOt(otId, tecnicoId, motivosPorOt[otId], revisadoPor, tipoModificacion);
+            const ot = buscarOtEnPropuesta(propuesta, otId);
+            return window.RUTAS_EXTERNO_API.patchTecnicoOt(otId, tecnicoId, motivosPorOt[otId], revisadoPor, tipoModificacion,
+              rxLoad(RX_KEYS.inicioPlanificacion, null), ot?.kilometrajeEstimado ?? null);
           })
         );
         // No se bloquea el guardado entero por esto: cada PATCH es una
@@ -2565,9 +2731,24 @@ function RutasExternoScreen({ onToast, go, route }) {
         }
       } else {
         const payload = construirPayloadAsignaciones();
-        await window.RUTAS_EXTERNO_API.confirmarAsignaciones(payload);
+        const respuesta = await window.RUTAS_EXTERNO_API.confirmarAsignaciones(payload);
         setConfirmados(prev => ({ ...prev, [fecha]: { porTecnico: fusionarPorTecnico(prev[fecha]?.porTecnico, propuesta.porTecnico), fecha, generadoEn } }));
-        onToast?.("Plan de rutas confirmado y guardado");
+        // GoodRoute guarda lo válido y reporta el resto sin fallar todo
+        // (ver confirmarAsignaciones en data.js) — si informó errores, se
+        // avisan en la selección igual que los PATCH parciales de arriba.
+        // errores[] = OT que no se pudieron aplicar; base_de_datos.error =
+        // se aplicó en memoria pero no se guardó en la BD.
+        const errores = Array.isArray(respuesta?.errores) ? respuesta.errores : [];
+        const errorBd = respuesta?.base_de_datos?.error || null;
+        if (errores.length > 0 || errorBd) {
+          const partes = [];
+          if (errores.length > 0) partes.push(`${errores.length} OT no se pudieron asignar: ${errores.map(e => `${e.ot_id} (${e.error})`).join("; ")}`);
+          if (errorBd) partes.push(`no se pudo guardar en la base de datos (${errorBd})`);
+          mensajeErrorFinal = `El plan se confirmó con problemas — ${partes.join(" · ")}`;
+          onToast?.("Plan confirmado con errores parciales");
+        } else {
+          onToast?.("Plan de rutas confirmado y guardado");
+        }
       }
       setPropuesta(null);
       setPropuestaOriginal(null);
@@ -2577,6 +2758,7 @@ function RutasExternoScreen({ onToast, go, route }) {
       setEsReedicion(false);
       setMotivosPorOt({});
       setOtPidiendoMotivo(null);
+      descartarInicioPlanificacion();
       setEtapa("seleccion");
     } catch (err) {
       setError(`No se pudo guardar la confirmación: ${err.message}`);
@@ -2605,7 +2787,7 @@ function RutasExternoScreen({ onToast, go, route }) {
         </div>
         <div className="page-head-actions">
           {etapa === "seleccion" ? (
-            <button className="btn btn-primary" style={{ padding: "10px 18px", fontSize: 14 }} onClick={() => go("rutasExternoRegistro")}>
+            <button className="btn btn-primary" style={{ padding: "10px 18px", fontSize: 14 }} onClick={() => go("rutasExternoRegistro", { fecha })}>
               <Icon name="clock" />Rutas confirmadas
             </button>
           ) : propuesta && (
@@ -2617,17 +2799,24 @@ function RutasExternoScreen({ onToast, go, route }) {
         </div>
       </div>
 
-      <div className="card card-pad" style={{ marginBottom: 16 }}>
-        <TiraDias fecha={fecha} onSeleccionar={onSeleccionarFecha} estadoDelDia={estadoDelDia}
-          fechaMin={fechaMin} fechaMax={fechaMax}
-          otsPorAsignarCount={otsDelDia.length} tecnicosCount={tecnicosDisponibles.length}
-          totalConfirmadas={estadoDelDia(fecha).confirmadas} onVerConfirmadas={() => onEditarConfirmado(fecha)} />
-      </div>
+      {etapa === "propuesta" && propuesta ? (
+        <EncabezadoVerificacion fecha={fecha} resumen={resumen} pendientesCount={propuesta.pendientes.length} onVolver={onPedirVolver}
+          tituloVolver={vieneDeRegistro ? "Volver a Rutas confirmadas" : "Volver a la selección"}
+          deshabilitado={confirmando || Object.values(recalculando).some(Boolean)} />
+      ) : (
+        <div className="card card-pad" style={{ marginBottom: 16 }}>
+          <TiraDias fecha={fecha} onSeleccionar={onSeleccionarFecha} estadoDelDia={estadoDelDia}
+            fechaMin={fechaMin} fechaMax={fechaMax}
+            otsPorAsignarCount={otsDelDia.length} tecnicosCount={tecnicosDisponibles.length}
+            totalConfirmadas={estadoDelDia(fecha).confirmadas} onVerConfirmadas={() => onEditarConfirmado(fecha)} />
+        </div>
+      )}
 
-      {fechaPendienteCambio && (
-        <ConfirmarCambioFechaModal
-          onCancelar={() => setFechaPendienteCambio(null)}
-          onConfirmar={() => { cambiarFecha(fechaPendienteCambio); setFechaPendienteCambio(null); }}
+      {confirmandoDescarte && (
+        <ConfirmarDescartarModal fecha={fecha} esReedicion={esReedicion}
+          destino={vieneDeRegistro ? "a Rutas confirmadas" : "a la selección"}
+          onCancelar={() => setConfirmandoDescarte(false)}
+          onConfirmar={() => { onVolver(); setConfirmandoDescarte(false); }}
         />
       )}
 
@@ -2641,13 +2830,13 @@ function RutasExternoScreen({ onToast, go, route }) {
         <SeleccionPanel fecha={fecha} otsDelDia={otsDelDia} tecnicosDisponibles={tecnicosDisponibles}
           otsSel={otsSel} tecSel={tecSel} toggleOt={toggleOt} toggleTec={toggleTec}
           onToggleTodosOts={setTodosOts} onToggleTodosTec={setTodosTec} onOptimizar={onOptimizar}
-          onAsignacionManual={onAsignacionManual} diaConfirmado={estadoDelDia(fecha).confirmadas > 0}
+          onAsignacionManual={onAsignacionManual}
           optimizando={optimizando} error={error} />
       ) : (
-        <PropuestaPanel propuesta={propuesta} propuestaOriginal={propuestaOriginal} resumen={resumen} error={error} recalculando={recalculando} erroresTecnico={erroresTecnico} confirmando={confirmando}
+        <PropuestaPanel propuesta={propuesta} propuestaOriginal={propuestaOriginal} error={error} recalculando={recalculando} erroresTecnico={erroresTecnico} confirmando={confirmando}
           onMoveUp={onMoveUp} onMoveDown={onMoveDown} onMover={onMover} onEliminar={onEliminar}
           onMoverPendiente={onMoverPendiente} onRestablecerRuta={onRestablecerRuta}
-          onVolver={onVolver} onConfirmar={onConfirmar}
+          onConfirmar={onConfirmar}
           esReedicion={esReedicion} motivosPorOt={motivosPorOt}
           confirmadoPrevioPorTecnico={esReedicion ? null : confirmados[fecha]?.porTecnico} />
       )}
@@ -2661,7 +2850,7 @@ function RutasExternoScreen({ onToast, go, route }) {
           }}
         />
       )}
-      <PanelOptimizando abierto={optimizando}
+      <PanelOptimizando abierto={optimizando} finalizando={finalizandoOptimizacion}
         totalOts={contextoOptimizando?.totalOts ?? 0} totalTecnicos={contextoOptimizando?.totalTecnicos ?? 0}
         fecha={contextoOptimizando?.fecha ?? fecha}
         error={errorOptimizando} onReintentar={onOptimizar} onCerrar={() => setErrorOptimizando(null)} />

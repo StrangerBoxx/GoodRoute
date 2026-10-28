@@ -8,9 +8,15 @@
    (técnicos, OT) como la optimización en sí — ya no son dos
    servicios separados como antes.
 
-   Circuito conectado por ahora (alcance "básico", HU-17):
-     GET  /api/tecnicos                    lista de técnicos
-     GET  /api/ordenes?estado=por_asignar  OT elegibles
+   27/10/2026: el equipo de BD reemplazó api-dummy-yurf por GoodRoute
+   (https://goodroute-backend.onrender.com) — es la fuente de verdad de
+   técnicos y OT (camelCase) y donde se persiste la confirmación. El
+   optimizador tiene su PROPIO set de técnicos/OT (otros ids), así que ya
+   no se leen de ahí: se cargan de GoodRoute y se le mandan al optimizador
+   en el body de /ejecutar (técnicos y órdenes explícitos), que solo
+   propone rutas. Ver GOODROUTE_API_BASE_URL más abajo.
+
+   Del optimizador se usa:
      POST /api/optimizador/ejecutar        corre la optimización (causa
        clasificada real en diagnosticos[]: causa_principal/causas[]/
        precision_ubicacion — ya no hace falta parsear "razones")
@@ -23,8 +29,14 @@
        parámetros (PUT solo con las claves a cambiar; fuera de rango 422)
      POST /api/optimizador/configuracion/restaurar   volver a los defaults
 
-   Persistencia del plan confirmado (HU-18) — backend DISTINTO, del
-   equipo de base de datos (confirmado el 01/10/2026):
+   GoodRoute (equipo de BD, desde el 27/10/2026):
+     GET   /api/v1/tecnicos                         técnicos
+     GET   /api/v1/ordenes?estado=porAsignar        OT elegibles
+     GET   /api/v1/ordenes                          todas (para "Rutas confirmadas")
+     PATCH /api/v1/ordenes/{id}/asignar-tecnico     reprogramar/descartar una OT
+     POST  /api/asignar-tecnicos                    confirmar el plan completo
+   (lo que sigue es la historia de cómo se llegó a este circuito, con el
+   backend anterior):
      POST https://api-dummy-yurf.onrender.com/api/asignar-tecnicos
        Se llama una sola vez al confirmar el plan (onConfirmar), nunca al
        solo ejecutar el optimizador (eso sigue siendo una simulación
@@ -52,6 +64,36 @@
    ============================================================ */
 (function () {
   const API_BASE_URL = "https://optimizador-demo.onrender.com/api";
+  // Técnicos, OT y persistencia de asignaciones (equipo de BD).
+  const GOODROUTE_API_BASE_URL = "https://goodroute-backend.onrender.com/api";
+
+  // GoodRoute entrega el tipo de OT en camelCase ("instalacionSimple") y el
+  // optimizador lo exige en snake_case ("instalacion_simple") — si le llega
+  // en camelCase no falla, pero no lo reconoce y usa la duración de
+  // servicio por defecto (30 min en vez de 45 para una instalación simple,
+  // verificado contra el endpoint real). Adentro de la app se usa siempre
+  // snake_case (igual que el optimizador y TIPO_OT_LABEL); al persistir en
+  // GoodRoute se vuelve a camelCase, que es su propio vocabulario.
+  // GoodRoute entrega fechaProgramada + horaProgramada en UTC (modelo v3.0
+  // del backoffice). El optimizador trabaja en hora de Chile (su jornada
+  // es 08:00–18:00 local): verificado el 27/10/2026, mandándole las horas
+  // UTC dejaba 6 de 18 OT fuera de jornada; convertidas, 2 de 18. Toda la
+  // app usa hora de Chile — la conversión se hace una sola vez, al leer.
+  const TZ_CHILE = "America/Santiago";
+  const formatoChile = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ_CHILE, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  });
+  function aHoraChile(fechaUTC, horaUTC) {
+    if (!fechaUTC || !horaUTC) return { fecha: fechaUTC || null, hora: null };
+    const [y, m, d] = fechaUTC.split("-").map(Number);
+    const [h, mi] = horaUTC.split(":").map(Number);
+    const partes = Object.fromEntries(formatoChile.formatToParts(new Date(Date.UTC(y, m - 1, d, h, mi))).map(x => [x.type, x.value]));
+    return { fecha: `${partes.year}-${partes.month}-${partes.day}`, hora: `${partes.hour}:${partes.minute}` };
+  }
+
+  const tipoDesdeGoodRoute = (tipo) => (tipo || "").replace(/[A-Z]/g, (c) => "_" + c.toLowerCase());
+  const tipoParaGoodRoute = (tipo) => (tipo || "").replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 
   // toISOString() convierte a UTC, lo que adelanta la fecha un día en
   // horario de tarde/noche en Chile (UTC-3/-4) — se arma el ISO a mano
@@ -105,16 +147,21 @@
       region: t.region,
       tipo: t.tipo,
       color: colorPorId(t.id),
+      // 7 booleanos, de lunes a domingo (GoodRoute). Como el optimizador
+      // recibe los técnicos en el body, los asume disponibles: el filtro
+      // por día lo hace RutasExterno.jsx (ver disponibleEn).
+      disponibilidad: Array.isArray(t.disponibilidad) ? t.disponibilidad : null,
+      activo: t.activo !== false,
     };
   }
 
   /* Lista de técnicos para el panel de selección. Ya no se cruza contra
-     /disponibilidad (el contrato actual la deja fuera de lo que usa la
-     página — ver mensaje del equipo de optimización) ni se filtra por
-     día: el backend resuelve disponibilidad por su cuenta al ejecutar. */
+     /disponibilidad del optimizador: la disponibilidad por día viene en
+     cada técnico de GoodRoute y se aplica en la pantalla, según el día
+     elegido (ver disponibleEn en RutasExterno.jsx). */
   async function obtenerTecnicos() {
-    const tecnicos = await fetchJSON(`${API_BASE_URL}/tecnicos`);
-    return tecnicos.map(construirTecnico);
+    const tecnicos = await fetchJSON(`${GOODROUTE_API_BASE_URL}/v1/tecnicos`);
+    return tecnicos.filter(t => t.activo !== false).map(construirTecnico);
   }
 
   const TIPO_OT_LABEL = {
@@ -137,11 +184,13 @@
   // ("<calle>, <comuna>") — así es como geocodifica bien (confirmado
   // probando el endpoint real: con eso arma coordenadas a nivel de calle).
   function construirOt(o) {
+    const tipo = tipoDesdeGoodRoute(o.tipo);
+    const local = aHoraChile(o.fechaProgramada, o.horaProgramada);
     return {
       id: o.id,
-      tipo: o.tipo,
-      cliente: TIPO_OT_LABEL[o.tipo] || o.tipo,
-      direccion: o.comuna ? `${o.direccion_instalacion}, ${o.comuna}` : o.direccion_instalacion,
+      tipo,
+      cliente: TIPO_OT_LABEL[tipo] || tipo,
+      direccion: o.comuna ? `${o.direccionInstalacion}, ${o.comuna}` : o.direccionInstalacion,
       comuna: o.comuna,
       region: o.region,
       // Día para el que está programada esta OT (puede venir null = sin
@@ -149,10 +198,11 @@
       // mostraba las mismas OT sin importar la fecha elegida en el
       // selector (ver el comentario de más abajo, en el efecto que carga
       // técnicos/OT). Ahora sí filtra por día (ver RutasExterno.jsx).
-      fechaProgramada: o.fecha_programada || null,
-      horaProgramada: o.hora_programada || null,
-      ventanaInicio: o.hora_programada ? sumarMinutos(o.hora_programada, -30) : "08:00",
-      ventanaFin: o.hora_programada ? sumarMinutos(o.hora_programada, 30) : "18:00",
+      // En hora de Chile (ver aHoraChile).
+      fechaProgramada: local.fecha,
+      horaProgramada: local.hora,
+      ventanaInicio: local.hora ? sumarMinutos(local.hora, -30) : "08:00",
+      ventanaFin: local.hora ? sumarMinutos(local.hora, 30) : "18:00",
     };
   }
 
@@ -160,29 +210,23 @@
   // (antes había que traer todas las OT y filtrar acá — el filtro local
   // se mantiene como defensa por si el parámetro no se respeta).
   async function obtenerOtsPorAsignar() {
-    const ordenes = await fetchJSON(`${API_BASE_URL}/ordenes?estado=por_asignar`);
+    const ordenes = await fetchJSON(`${GOODROUTE_API_BASE_URL}/v1/ordenes?estado=porAsignar`);
     return ordenes
-      .filter(o => o.estado === "por_asignar")
+      .filter(o => o.estado === "porAsignar")
       .map(construirOt)
       // Se muestran ordenadas por ventana de atención (hora de inicio) —
       // si no, la lista se ve "desordenada" con horarios mezclados.
       .sort((a, b) => a.ventanaInicio.localeCompare(b.ventanaInicio));
   }
 
-  // Ejecuta la optimización real (POST /api/optimizador/ejecutar).
-  // aplicar_cambios se manda SIEMPRE explícito en false acá: esta llamada
-  // es para generar la propuesta que se revisa/edita en pantalla, no para
-  // persistirla (eso es "Confirmar plan" — ver onConfirmar() en
-  // RutasExterno.jsx, todavía sin conectar: falta que el equipo del
-  // optimizador defina cómo persistir el plan tal como queda editado acá,
-  // sin volver a resolver desde cero). Mandarlo explícito importa: si la
-  // planificadora deja "Aplicar asignaciones automáticamente" en true
-  // desde el panel de configuración, esta llamada de solo-vista-previa NO
-  // debe heredar ese default y aplicar cambios por sorpresa.
-  // tiempo_limite_segundos sí se deja opcional: si no se pasa, el backend
+  // Ejecuta la optimización real (POST /api/optimizador/ejecutar). Desde
+  // la v3.0.0 del optimizador ya NO existe aplicar_cambios (responde 422
+  // si se manda): solo propone rutas, y la asignación la persiste
+  // GoodRoute recién al confirmar (ver confirmarAsignaciones).
+  // tiempo_limite_segundos se deja opcional: si no se pasa, el backend
   // lo calcula según la cantidad de OTs (comportamiento recomendado).
   async function ejecutarOptimizacion({ fecha, tecnicos, ordenes, tiempoLimiteSegundos }) {
-    const body = { fecha, aplicar_cambios: false, tecnicos, ordenes };
+    const body = { fecha, tecnicos, ordenes };
     if (tiempoLimiteSegundos != null) body.tiempo_limite_segundos = tiempoLimiteSegundos;
     return postJSON(`${API_BASE_URL}/optimizador/ejecutar`, body);
   }
@@ -228,32 +272,35 @@
   // pedir fecha por fecha (ver obtenerAsignacionesConfirmadasPorFecha,
   // usada para rehidratar el banner "Rutas confirmadas" de cada día al
   // abrir la pantalla).
+  // Desde el 27/10/2026 sale de GoodRoute (camelCase): mismo criterio,
+  // OT con tecnicoId y fechaProgramada.
   async function agruparAsignacionesConfirmadas() {
     const [ordenes, tecnicos] = await Promise.all([
-      fetchJSON(`${ASIGNACIONES_API_BASE_URL}/ordenes`),
-      fetchJSON(`${ASIGNACIONES_API_BASE_URL}/tecnicos`),
+      fetchJSON(`${GOODROUTE_API_BASE_URL}/v1/ordenes`),
+      fetchJSON(`${GOODROUTE_API_BASE_URL}/v1/tecnicos`),
     ]);
     const tecnicoPorId = Object.fromEntries(tecnicos.map(t => [t.id, t]));
     const porFecha = {};
     ordenes
-      .filter(o => o.tecnico_id && o.fecha_programada)
+      .filter(o => o.tecnicoId && o.fechaProgramada)
       .forEach(o => {
-        const porTecnico = porFecha[o.fecha_programada] || (porFecha[o.fecha_programada] = {});
-        if (!porTecnico[o.tecnico_id]) {
-          const t = tecnicoPorId[o.tecnico_id];
-          porTecnico[o.tecnico_id] = {
-            tecnico_id: o.tecnico_id,
-            nombre: t ? `${t.nombre} ${t.apellidos}` : o.tecnico_id,
+        const local = aHoraChile(o.fechaProgramada, o.horaProgramada);
+        const porTecnico = porFecha[local.fecha] || (porFecha[local.fecha] = {});
+        if (!porTecnico[o.tecnicoId]) {
+          const t = tecnicoPorId[o.tecnicoId];
+          porTecnico[o.tecnicoId] = {
+            tecnico_id: o.tecnicoId,
+            nombre: t ? `${t.nombre} ${t.apellidos}` : o.tecnicoId,
             zona: t ? t.zona : null,
             tipo: t ? t.tipo : null,
             paradas: [],
           };
         }
-        porTecnico[o.tecnico_id].paradas.push({
+        porTecnico[o.tecnicoId].paradas.push({
           ot_id: o.id,
-          tipo: o.tipo,
-          direccion: o.comuna ? `${o.direccion_instalacion}, ${o.comuna}` : o.direccion_instalacion,
-          hora_programada: o.hora_programada,
+          tipo: tipoDesdeGoodRoute(o.tipo),
+          direccion: o.comuna ? `${o.direccionInstalacion}, ${o.comuna}` : o.direccionInstalacion,
+          hora_programada: local.hora,
         });
       });
     const resultado = {};
@@ -264,6 +311,24 @@
       resultado[fecha] = Object.values(porTecnico);
     });
     return resultado;
+  }
+
+  // KPI del catálogo HU-24 para un RANGO de fechas (GET /api/kpis/rango,
+  // máx. 93 días) en una sola llamada — reemplaza pedir /api/kpis fecha por
+  // fecha (eran ~500 llamadas para la ventana del dashboard). `kpis` es una
+  // lista plana { sigla, fecha, tecnico_id, numerador, denominador, valor }:
+  // sin opciones, solo filas globales (tecnico_id null); con
+  // porTecnico:true, además una fila por fecha y técnico para OTA, OTR,
+  // OTX, TTR, TPS y TAR (OTP y TPL existen solo en global). Si la BD falla,
+  // OTA/OTR/TAR/TPL vienen en `errores` y el resto se devuelve igual.
+  async function obtenerKpisRango(fechaDesde, fechaHasta, { porTecnico = false } = {}) {
+    const q = new URLSearchParams({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta });
+    if (porTecnico) q.set("por_tecnico", "true");
+    const url = `${GOODROUTE_API_BASE_URL}/kpis/rango?${q}`;
+    const res = await fetch(url);
+    if (res.status === 404) throw new Error("GoodRoute todavía no tiene /api/kpis/rango desplegado");
+    if (!res.ok) throw new Error(`${url} respondió ${res.status}`);
+    return res.json();
   }
 
   async function obtenerRutasRegistradas(fecha) {
@@ -351,7 +416,10 @@
          problema (motivo_reprogramacion no está en su schema todavía,
          lo ignora hasta que lo agreguen) y persiste tecnico_id/estado.
      ---------------------------------------------------------- */
-  const ASIGNACIONES_API_BASE_URL = "https://api-dummy-yurf.onrender.com/api";
+  // 27/10/2026: el POST y el PATCH van a GoodRoute (reemplaza a
+  // api-dummy-yurf). Su contrato ya declara inicio_planificacion y
+  // kilometraje_estimado (HU-30) en ambos.
+  const ASIGNACIONES_API_BASE_URL = GOODROUTE_API_BASE_URL;
 
   async function manejarRespuestaAsignaciones(res) {
     if (!res.ok) {
@@ -366,11 +434,22 @@
     return res.json();
   }
 
+  // GoodRoute aplica el plan con "estrategia parcial": lo válido se guarda
+  // y los errores se reportan sin frenar el resto. Respuesta documentada:
+  // total_recibidas, total_actualizadas, actualizadas[], errores[{ot_id,
+  // error}] y base_de_datos{insertados, error} — RutasExterno.jsx avisa
+  // ambos tipos de error. El tipo de OT se devuelve a camelCase, el
+  // vocabulario de GoodRoute.
   async function confirmarAsignaciones(payload) {
+    const cuerpo = {
+      ...payload,
+      rutas: payload.rutas.map(r => ({ ...r, paradas: r.paradas.map(p => ({ ...p, tipo: tipoParaGoodRoute(p.tipo) })) })),
+      pendientes: (payload.pendientes || []).map(p => ({ ...p, tipo: tipoParaGoodRoute(p.tipo) })),
+    };
     const res = await fetch(`${ASIGNACIONES_API_BASE_URL}/asignar-tecnicos`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(cuerpo),
     });
     return manejarRespuestaAsignaciones(res);
   }
@@ -390,20 +469,30 @@
   // tecnico_id/motivo_reprogramacion), así que de momento el backend los
   // va a ignorar hasta que los agreguen de su lado. Se mandan igual para
   // no tener que volver a tocar el frontend cuando los sumen.
-  async function patchTecnicoOt(otId, tecnicoId, motivoReprogramacion, revisadoPor, tipoModificacion) {
-    const res = await fetch(`${ASIGNACIONES_API_BASE_URL}/ordenes/${encodeURIComponent(otId)}/tecnico`, {
+  //
+  // En GoodRoute el endpoint es /v1/ordenes/{id}/asignar-tecnico y ya
+  // declara revisado_por/tipo_modificacion, además de
+  // inicio_planificacion y kilometraje_estimado (HU-30), que ahora se
+  // mandan también al reprogramar.
+  async function patchTecnicoOt(otId, tecnicoId, motivoReprogramacion, revisadoPor, tipoModificacion, inicioPlanificacion, kilometrajeEstimado) {
+    const res = await fetch(`${ASIGNACIONES_API_BASE_URL}/v1/ordenes/${encodeURIComponent(otId)}/asignar-tecnico`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         tecnico_id: tecnicoId,
+        // Edición manual, no propuesta del optimizador: GoodRoute la guarda
+        // con id_propuesta NULL (y no cuenta para TAR). Se manda explícito.
+        id_propuesta: null,
         motivo_reprogramacion: motivoReprogramacion,
         revisado_por: revisadoPor,
         tipo_modificacion: tipoModificacion,
+        inicio_planificacion: inicioPlanificacion ?? null,
+        kilometraje_estimado: kilometrajeEstimado ?? null,
       }),
     });
     const data = await manejarRespuestaAsignaciones(res);
     if (data && data.guardado_en_bd === false) {
-      throw new Error(`${otId} se actualizó pero no se pudo guardar en la base de datos.`);
+      throw new Error(`${otId} se actualizó pero no se pudo guardar en la base de datos${data.db_error ? ` (${data.db_error})` : ""}.`);
     }
     return data;
   }
@@ -412,6 +501,7 @@
     API_BASE_URL, hoyISO, sumarDiasISO, fetchJSON,
     obtenerTecnicos, obtenerOtsPorAsignar,
     ejecutarOptimizacion, obtenerRutasRegistradas, obtenerAsignacionesConfirmadasPorFecha, obtenerGeometriaRuta,
+    obtenerKpisRango,
     obtenerCatalogoParametros, obtenerConfiguracion, guardarConfiguracion, restaurarConfiguracion,
     confirmarAsignaciones, patchTecnicoOt,
     // Compartidos para reconstruir objetos ot/técnico a partir de la

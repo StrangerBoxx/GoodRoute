@@ -112,14 +112,22 @@
      números de la corrida original ya desactualizados.
      `obtenerGeometriaRuta` se inyecta (viene de RUTAS_EXTERNO_API) para no
      duplicar acá la URL del backend. */
+  // Tolerancia de la ventana de una OT con hora (R4 del optimizador): en
+  // v3.1.0 son dos parámetros (antes/después); en v3.0.0, uno solo
+  // (ventana_tolerancia_min) para ambos lados. Se aceptan los dos.
+  function toleranciasVentana(config) {
+    const unica = config?.ventana_tolerancia_min ?? 30;
+    return { antes: config?.tolerancia_antes_min ?? unica, despues: config?.tolerancia_despues_min ?? unica };
+  }
+
   // `violaciones` acá son las restricciones "obvias" que la coordinadora
   // pidió aplicar al editar a mano: capacidad máxima del técnico y que la
   // ruta no termine después del fin de jornada ni haga llegar una OT
   // después de su propia ventana. RutasExterno.jsx revierte la edición si
   // alguna de estas sale true — no es solo un aviso.
-  function evaluarViolaciones(paradasActualizadas, capacidadMax, horaRetornoBaseMin, finJornadaMin) {
+  function evaluarViolaciones(paradasActualizadas, capacidadMax, horaFinRutaMin, finJornadaMin) {
     const sobrecapacidad = paradasActualizadas.length > capacidadMax;
-    const excedeJornada = horaRetornoBaseMin > finJornadaMin;
+    const excedeJornada = horaFinRutaMin > finJornadaMin;
     const otsFueraDeVentana = paradasActualizadas.filter(p => hhmmAMin(p.horaEstimadaLlegada) > hhmmAMin(p.ventanaFin));
     return { hay: sobrecapacidad || excedeJornada || otsFueraDeVentana.length > 0, sobrecapacidad, excedeJornada, otsFueraDeVentana };
   }
@@ -129,12 +137,15 @@
       ? (config?.capacidad_max_interno ?? 12)
       : (config?.capacidad_max_externo ?? 8);
     const jornadaInicioMin = (config?.inicio_jornada_horas ?? 8) * 60;
-    const finJornadaMin = jornadaInicioMin + (config?.fin_jornada_minutos ?? 600);
+    // El fin de jornada es una hora (fin_jornada_horas), no una duración —
+    // antes se leía fin_jornada_minutos, que no existe: daba 18:00 por el
+    // valor por defecto y nunca seguía lo configurado.
+    const finJornadaMin = (config?.fin_jornada_horas ?? 18) * 60;
 
     if (paradas.length === 0) {
       return {
         paradas: [],
-        resumen: { horaSalidaBase: null, horaRetornoBase: null, distanciaTotalKm: 0, esperaTotalMin: 0, capacidadUso: `0/${capacidadMax}` },
+        resumen: { horaSalidaBase: null, horaFinRuta: null, distanciaTotalKm: 0, esperaTotalMin: 0, capacidadUso: `0/${capacidadMax}` },
         violaciones: { hay: false, sobrecapacidad: false, excedeJornada: false, otsFueraDeVentana: [] },
       };
     }
@@ -142,10 +153,11 @@
     const tiemposServicio = config?.tiempos_servicio_por_tipo || {};
     const servicioDefault = config?.tiempo_servicio_default ?? 30;
 
+    // Rutas ABIERTAS (R2 del optimizador v3.1.0): parten en la base y
+    // terminan en la última OT, sin tramo de vuelta.
     const puntos = [
       { lat: tecnico.lat, lng: tecnico.lng },
       ...paradas.map(p => ({ lat: p.lat, lng: p.lng })),
-      { lat: tecnico.lat, lng: tecnico.lng },
     ];
     // Un tramo por par consecutivo de puntos, todos en paralelo (no
     // dependen uno del otro) para no sumar latencia de red por cada
@@ -171,13 +183,10 @@
       esperaTotalMin += espera;
       return { ...p, horaEstimadaLlegada, esperaMin: Math.round(espera) };
     });
-    const legVuelta = legs[legs.length - 1];
-    distanciaTotalKm += legVuelta.km;
-    clock += legVuelta.min;
-
+    // `clock` ya es el fin del servicio de la última OT: ahí termina la ruta.
     const resumen = {
       horaSalidaBase: minAHhmm(jornadaInicioMin),
-      horaRetornoBase: minAHhmm(clock),
+      horaFinRuta: minAHhmm(clock),
       distanciaTotalKm,
       esperaTotalMin: Math.round(esperaTotalMin),
       capacidadUso: `${paradas.length}/${capacidadMax}`,
@@ -185,5 +194,5 @@
     return { paradas: paradasActualizadas, resumen, violaciones: evaluarViolaciones(paradasActualizadas, capacidadMax, clock, finJornadaMin) };
   }
 
-  window.RUTAS_EXTERNO_OPTIMIZER = { validarConfirmacion, calcularLlegadas, haversineKm, minAHhmm, recalcularResumenRuta };
+  window.RUTAS_EXTERNO_OPTIMIZER = { validarConfirmacion, calcularLlegadas, haversineKm, minAHhmm, recalcularResumenRuta, toleranciasVentana };
 })();

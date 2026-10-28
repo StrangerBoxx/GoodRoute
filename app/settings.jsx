@@ -5,7 +5,7 @@ function Settings() {
       <div className="page-head">
         <div>
           <div className="page-title">Configuración</div>
-          <div className="page-sub">Configuración del optimizador.</div>
+          <div className="page-sub">Reglas de la operación que usa el optimizador al armar rutas.</div>
         </div>
       </div>
 
