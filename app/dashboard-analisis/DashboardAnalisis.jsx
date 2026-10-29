@@ -25,10 +25,11 @@ const {
 
 /* ==========================================================================
    1. ORIGEN DEL DATO
-   Todos los indicadores del catálogo son los 8 KPI del sprint (HU-24) y
-   salen de GoodRoute (GET /api/kpis/rango, sección 4b). Los que no tenían
-   fuente real (CVH, KMT, UTJ, TIV, KMA) se sacaron del catálogo el
-   28/10/2026; si vuelven, tienen que venir con datos reales.
+   Todos los indicadores del catálogo salen de GoodRoute (GET
+   /api/kpis/rango, sección 4b): los 8 KPI de HU-24 más CVH y UJO,
+   sumados por el backend el 28/10/2026. Los que no tenían fuente real
+   (KMT, TIV, KMA) se sacaron del catálogo; si vuelven, tienen que venir
+   con datos reales.
    ========================================================================== */
 
 /* ==========================================================================
@@ -100,6 +101,16 @@ const INDICADORES = [
     unidad: "OT", formato: "ot", direccion: "menos", granularidad: "tecnico",
     grupo: "operacion", grafico: "barras_verticales",
   },
+  {
+    id: "cumplimiento_ventana",
+    sigla: "CVH",
+    nombre: "Cumplimiento de ventana horaria",
+    definicion: "Porcentaje de OT en que el técnico llegó dentro de la ventana comprometida (hasta 30 min antes y 15 min después de la hora programada).",
+    formula: "OT con inicio de visita dentro de la ventana / OT con inicio de visita",
+    fuente: "GoodRoute: inicio de visita y hora programada de las OT.",
+    unidad: "%", formato: "pct", direccion: "mas", granularidad: "tecnico",
+    grupo: "operacion", grafico: "linea_banda_min_max",
+  },
 
   // ---- Uso de recursos ----
   {
@@ -120,6 +131,16 @@ const INDICADORES = [
     formula: "promedio(comprobante de la OT − documento de inicio de la OT)",
     fuente: "GoodRoute (HU-24): documento de inicio y comprobantes de las OT.",
     unidad: "min", formato: "min", direccion: "menos", granularidad: "tecnico",
+    grupo: "recurso", grafico: "linea_banda_min_max",
+  },
+  {
+    id: "utilizacion_jornada",
+    sigla: "UJO",
+    nombre: "Utilización de jornada",
+    definicion: "Porcentaje de la jornada (08:00 a 19:00) que los técnicos con OT ese día pasaron trabajando.",
+    formula: "minutos de trabajo (inicio de visita → comprobante) / (660 min × técnicos con OT)",
+    fuente: "GoodRoute: inicio de visita y comprobantes de las OT.",
+    unidad: "%", formato: "pct", direccion: "mas", granularidad: "tecnico",
     grupo: "recurso", grafico: "linea_banda_min_max",
   },
 
@@ -157,7 +178,8 @@ const GRUPOS = [
    --------------------------------------------------------------------------
    Técnicos y zonas salen de GoodRoute (base.tecnicos, cargado en
    useTablero), así los filtros muestran exactamente lo que existe en los
-   datos reales. No hay filtro por tipo de OT: /api/kpis no lo soporta.
+   datos reales. No hay filtro por tipo de OT: /api/kpis no lo soporta. La
+   zona es el único caso que se calcula en el front (ver sección 4b).
    ========================================================================== */
 const zonasDe = (tecnicos) => [...new Set(tecnicos.map((t) => t.zona).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es"));
 const TIPO_OT_LABEL = window.RUTAS_EXTERNO_API.TIPO_OT_LABEL;
@@ -242,106 +264,117 @@ function obtenerSerie(indicadorId, rango, filtros, base) {
 }
 
 /* ==========================================================================
-   4b. KPI REALES — HU-24 (GET /api/kpis/rango), agregados localmente (HU-27)
+   4b. KPI REALES — GET /api/kpis/rango, calculados por la API
    --------------------------------------------------------------------------
-   useTablero carga una sola vez toda la VENTANA (los 30 días de historia que
-   guarda GoodRoute + los próximos días) con dos llamadas a /api/kpis/rango:
-   la global (con eso ya se ve el tablero) y la de por_tecnico=true (filtro
-   de técnico/zona, tabla y banda min/máx). Con eso, período, técnico y zona
-   se resuelven acá en memoria sumando las partes — nunca promediando los
-   `valor` — sin volver a llamar al backend.
+   El cálculo de los indicadores es de la API (aviso del backend del
+   28/10/2026). useTablero pide el PERÍODO elegido con dos llamadas a
+   /api/kpis/rango — la global (con eso ya se ve el tablero) y la de
+   por_tecnico=true (filtros, tabla y banda min/máx) — y de cada respuesta
+   usa:
+     kpis     una fila por fecha (y técnico): sparkline y detalle diario
+     totales  una fila por KPI (y técnico) con el total del período: valor
+              grande de la tarjeta, "Total del período" y tabla por técnico
+   Cambiar el período vuelve a pedir los datos (los totales dependen del
+   rango); cambiar técnico o zona no, porque el desglose ya vino completo.
+
+   Única excepción, acordada con el backend: el filtro de ZONA. La API no
+   tiene totales por zona, así que se suman acá las filas por técnico de
+   los técnicos de esa zona (ver sumarPorZona).
 
    base = {
-     ventana: { desde, hasta },          // ISO, lo que se cargó
+     periodo: { desde, hasta },          // ISO, lo que se pidió
      tecnicos: [...],                    // padrón de GoodRoute
      global: { [fecha]: { [sigla]: kpi } },
      porTecnico: { [tecnicoId]: { [fecha]: { [sigla]: kpi } } },
+     totales: { [sigla]: total },
+     totalesPorTecnico: { [tecnicoId]: { [sigla]: total } },
      tecnicosCargados: n,                // 0 hasta que llega el desglose
    }
    ========================================================================== */
 const VENTANA_DIAS_ATRAS = 30;
 const VENTANA_DIAS_ADELANTE = 7;
+// Fechas que GoodRoute puede devolver: 30 días de historia y los próximos
+// días ya programados. Acota el rango personalizado.
+const VENTANA = (() => {
+  const desde = new Date(HOY); desde.setDate(HOY.getDate() - VENTANA_DIAS_ATRAS);
+  const hasta = new Date(HOY); hasta.setDate(HOY.getDate() + VENTANA_DIAS_ADELANTE);
+  return { desde: iso(desde), hasta: iso(hasta) };
+})();
 // OTP y TPL existen solo en global (/api/kpis/rango no los desglosa por técnico).
 const SIN_DESGLOSE_POR_TECNICO = new Set(["OTP", "TPL"]);
 
-// Suma numerador/denominador de varias fuentes (técnicos o el global) y
-// devuelve el valor con la misma regla de HU-24: conteo -> numerador;
-// promedio -> num/den; TAR -> num/den en %. Denominador 0 -> null.
-function combinarPartes(ind, kpis) {
-  const presentes = kpis.filter(Boolean);
+// Solo para el filtro de zona: suma numeradores y denominadores de las
+// filas de los técnicos de la zona y divide al final — razones (%) por 100,
+// promedios (min) num/den, conteos con el numerador. Denominador 0 -> null.
+function sumarPorZona(ind, filas) {
+  const presentes = filas.filter(Boolean);
   if (!presentes.length) return null;
   const num = presentes.reduce((a, k) => a + (k.numerador || 0), 0);
-  const esConteo = presentes.every((k) => k.denominador == null);
-  if (esConteo) return { num, den: null, valor: num };
+  if (presentes.every((k) => k.denominador == null)) return num;
   const den = presentes.reduce((a, k) => a + (k.denominador || 0), 0);
-  if (!den) return { num, den, valor: null };
-  const escala = ind.formato === "pct" ? escalaPct(presentes) : 1;
-  return { num, den, valor: (num / den) * escala };
-}
-// TAR viene en %: si el backend ya entrega num/den como fracción, hay que
-// multiplicar por 100. Se deduce de un KPI con valor, para no asumirlo.
-function escalaPct(kpis) {
-  const k = kpis.find((x) => x.valor != null && x.denominador);
-  if (!k) return 100;
-  return Math.abs(k.valor - k.numerador / k.denominador) < 1e-6 ? 1 : 100;
+  if (!den) return null;
+  return (num / den) * (ind.formato === "pct" ? 100 : 1);
 }
 
 function derivarKpiReal(ind, dias, filtros, base, candidatos) {
   const vacio = (motivo, extra) => ({ serie: [], anterior: [], porTecnico: [], vacio: true, motivoVacio: motivo, ...extra });
   if (!base) return vacio("Cargando indicadores de GoodRoute…");
   const sigla = ind.sigla;
-  const isos = dias.map(iso);
-  const porTecnicoFiltrado = filtros.tecnico !== "todos" || filtros.zona !== "todas";
+  const tecnicoId = filtros.tecnico !== "todos" ? filtros.tecnico : null;
+  // Con un técnico elegido manda su valor (de la API); la zona solo se
+  // calcula acá cuando se filtra por zona sin técnico.
+  const porZona = !tecnicoId && filtros.zona !== "todas";
 
-  if (porTecnicoFiltrado && SIN_DESGLOSE_POR_TECNICO.has(sigla)) {
-    return vacio("GoodRoute calcula " + sigla + " solo a nivel de sistema: no se puede filtrar por técnico ni por zona. Sacá esos filtros para verlo.");
+  if (tecnicoId && SIN_DESGLOSE_POR_TECNICO.has(sigla)) {
+    return vacio("GoodRoute calcula " + sigla + " solo a nivel de sistema: no se puede filtrar por técnico. Sacá ese filtro para verlo.");
   }
-  const tecs = filtros.tecnico !== "todos" ? candidatos.filter((t) => t.id === filtros.tecnico) : candidatos;
-  const faltanTecnicos = tecs.some((t) => !base.porTecnico[t.id]);
-  if (porTecnicoFiltrado && faltanTecnicos) {
+  if (porZona && SIN_DESGLOSE_POR_TECNICO.has(sigla)) {
+    return vacio(sigla + " no está disponible por zona: GoodRoute lo calcula solo a nivel de sistema. Sacá el filtro de zona para verlo.");
+  }
+  const desgloseCargando = base.tecnicosCargados === 0;
+  if ((tecnicoId || porZona) && desgloseCargando) {
     return vacio("Cargando el desglose por técnico…", { desgloseCargando: true });
   }
 
-  const kpiDe = (mapa, f) => (mapa && mapa[f] ? mapa[f][sigla] : null);
-  const fuentesDelDia = (f) => (porTecnicoFiltrado ? tecs.map((t) => kpiDe(base.porTecnico[t.id], f)) : [kpiDe(base.global, f)]);
+  const valorDe = (kpi) => (kpi && kpi.valor != null ? kpi.valor : null);
+  const filaDe = (tecId, f) => { const m = base.porTecnico[tecId]; return m && m[f] ? m[f][sigla] : null; };
+  const valorDelDia = (f) => {
+    if (porZona) return sumarPorZona(ind, candidatos.map((t) => filaDe(t.id, f)));
+    if (tecnicoId) return valorDe(filaDe(tecnicoId, f));
+    return valorDe(base.global[f] && base.global[f][sigla]);
+  };
 
-  const banda = ind.grafico === "linea_banda_min_max" && !faltanTecnicos;
-  const serie = dias.map((d, i) => {
-    const f = isos[i];
-    const c = combinarPartes(ind, fuentesDelDia(f));
-    const punto = { iso: f, etiqueta: etiquetaFecha(d), valor: c ? c.valor : null };
+  const banda = ind.grafico === "linea_banda_min_max" && !desgloseCargando;
+  const serie = dias.map((d) => {
+    const f = iso(d);
+    const punto = { iso: f, etiqueta: etiquetaFecha(d), valor: valorDelDia(f) };
+    // Banda: el menor y el mayor valor diario entre los técnicos, tal cual
+    // los entrega la API (solo se ordenan, no se combinan).
     if (banda) {
-      const valores = tecs.map((t) => combinarPartes(ind, [kpiDe(base.porTecnico[t.id], f)]))
-        .filter((x) => x && x.valor != null).map((x) => x.valor).sort((a, b) => a - b);
+      const valores = candidatos.map((t) => valorDe(filaDe(t.id, f))).filter((v) => v != null).sort((a, b) => a - b);
       if (valores.length) { punto.min = valores[0]; punto.max = valores[valores.length - 1]; }
     }
     return punto;
   });
 
-  const enVentana = isos.filter((f) => f >= base.ventana.desde && f <= base.ventana.hasta);
-  if (!enVentana.length) {
-    return vacio("GoodRoute guarda " + VENTANA_DIAS_ATRAS + " días de historia (desde el " + fechaCompleta(base.ventana.desde) + "): el período elegido queda fuera.");
+  let valorPeriodo;
+  if (porZona) {
+    // base solo trae el período pedido: todas las filas de cada técnico.
+    valorPeriodo = sumarPorZona(ind, candidatos.flatMap((t) => Object.values(base.porTecnico[t.id] || {}).map((m) => m[sigla])));
+  } else {
+    valorPeriodo = valorDe(tecnicoId ? (base.totalesPorTecnico[tecnicoId] || {})[sigla] : base.totales[sigla]);
   }
 
-  // Valor del período: se suman las partes de todos los días (HU-24), no
-  // se promedian los valores diarios.
-  const delPeriodo = combinarPartes(ind, enVentana.flatMap(fuentesDelDia));
-
   let porTecnico = [];
-  let desgloseCargando = false;
-  if (ind.granularidad !== "global") {
-    if (faltanTecnicos) desgloseCargando = true;
-    else {
-      porTecnico = tecs.map((t) => {
-        const c = combinarPartes(ind, enVentana.map((f) => kpiDe(base.porTecnico[t.id], f)));
-        return { id: t.id, nombre: t.nombre, zona: t.zona, tipo: t.tipo, valor: c ? c.valor : null };
-      }).filter((x) => x.valor != null);
-    }
+  if (ind.granularidad !== "global" && !desgloseCargando) {
+    porTecnico = candidatos
+      .map((t) => ({ id: t.id, nombre: t.nombre, zona: t.zona, tipo: t.tipo, valor: valorDe((base.totalesPorTecnico[t.id] || {})[sigla]) }))
+      .filter((x) => x.valor != null);
   }
 
   return {
     serie, anterior: [], porTecnico, vacio: false, motivoVacio: "",
-    valorPeriodo: delPeriodo ? delPeriodo.valor : null, desgloseCargando,
+    valorPeriodo, desgloseCargando,
     motivoDesglose: desgloseCargando ? "Cargando el desglose por técnico…" : "",
   };
 }
@@ -375,15 +408,9 @@ function formatearCorto(valor, formato) {
   return formatear(valor, formato);
 }
 
-// Los días sin dato (valor null, ej. una tasa sin OT ese día) no cuentan.
-const conValor = (arr) => arr.filter((x) => x.valor != null);
-const promedio = (arr) => { const v = conValor(arr); return v.length ? v.reduce((a, b) => a + b.valor, 0) / v.length : null; };
-const suma = (arr) => conValor(arr).reduce((a, b) => a + b.valor, 0);
-
-// Los indicadores de conteo y de ahorro se leen como total; el resto, como promedio.
+// Solo para el rótulo del valor del período (lo calcula la API): los
+// conteos se leen como total; el resto, como promedio.
 const esAcumulable = (ind) => ["ot_asignadas", "ot_realizadas", "ot_pendientes", "ot_reprogramadas"].includes(ind.id);
-const valorRepresentativo = (ind, serie) =>
-  serie.length === 0 ? null : esAcumulable(ind) ? suma(serie) : promedio(serie);
 
 // Texto corto de la dirección declarada de un indicador — sale de INDICADORES,
 // nunca a mano. Se usa en la tarjeta y en las exportaciones.
@@ -630,7 +657,7 @@ function BarraFiltros({ rango, setRango, filtros, setFiltros, cargando, onRecarg
           ...zonasDe(tecnicos).map((z) => ({ valor: z, texto: z }))]} />
       {/* Sin filtro por tipo de OT: /api/kpis (HU-24) solo segmenta por
           fecha y técnico. La zona se resuelve sumando los técnicos de esa
-          zona. */}
+          zona (ver sumarPorZona). */}
 
       <button type="button" onClick={onRecargar} className="btn" style={{ marginLeft: "auto" }}>
         <span className={cargando ? "icon-spin" : ""}><Icon name="refresh" /></span>
@@ -647,12 +674,11 @@ function BarraFiltros({ rango, setRango, filtros, setFiltros, cargando, onRecarg
 // del técnico filtrado), que se arman fuera de React.
 let BASE_ACTUAL = null;
 
-// HU-27: el servicio se consulta UNA vez (al entrar y con "Actualizar") —
-// mover un slicer (período, técnico, zona) recalcula todos los KPI visibles
-// al instante, de forma local, sin volver al backend. La carga son dos
-// llamadas a /api/kpis/rango (HU-24) para toda la ventana: primero la
-// global (con eso ya se ve el tablero) y después la de por_tecnico=true
-// (para el filtro de técnico/zona, la tabla y la banda min/máx).
+// Los datos se piden al entrar, con "Actualizar" y al cambiar el período
+// (los totales de la API dependen del rango pedido). Son dos llamadas a
+// /api/kpis/rango: primero la global (con eso ya se ve el tablero) y
+// después la de por_tecnico=true (filtros de técnico/zona, tabla y banda
+// min/máx). Cambiar técnico o zona no vuelve a llamar: ese desglose ya vino.
 function useTablero() {
   const [rango, setRango] = useState({ preset: "30", dias: 30, desde: null, hasta: null });
   // tipoOT queda fijo en "todos": HU-24 no segmenta por tipo (ver BarraFiltros).
@@ -663,22 +689,28 @@ function useTablero() {
   const [servicio, setServicio] = useState({ estado: "cargando", error: null, actualizadoEn: null });
   const [base, setBase] = useState(null);
   const [tick, setTick] = useState(0);
+  const periodo = periodoDelRango(rango);
 
   useEffect(() => {
+    if (!periodo) return;
     let activo = true;
     setServicio((s) => ({ ...s, estado: "cargando", error: null, erroresKpi: [], errorDesglose: null }));
     const api = window.RUTAS_EXTERNO_API;
-    const fechas = [];
-    for (let i = -VENTANA_DIAS_ATRAS; i <= VENTANA_DIAS_ADELANTE; i++) {
-      const d = new Date(HOY); d.setDate(HOY.getDate() + i); fechas.push(iso(d));
-    }
-    const ventana = { desde: fechas[0], hasta: fechas[fechas.length - 1] };
-    // Lista plana -> { [fecha]: { [sigla]: kpi } }, global o por técnico.
+    // Filas diarias -> { [fecha]: { [sigla]: kpi } }, global o por técnico.
     const indexar = (filas) => {
       const global = {}, porTecnico = {};
       filas.forEach((k) => {
         const destino = k.tecnico_id ? (porTecnico[k.tecnico_id] = porTecnico[k.tecnico_id] || {}) : global;
         (destino[k.fecha] = destino[k.fecha] || {})[k.sigla] = k;
+      });
+      return { global, porTecnico };
+    };
+    // Totales del período -> { [sigla]: total }, global o por técnico.
+    const indexarTotales = (filas) => {
+      const global = {}, porTecnico = {};
+      filas.forEach((t) => {
+        const destino = t.tecnico_id ? (porTecnico[t.tecnico_id] = porTecnico[t.tecnico_id] || {}) : global;
+        destino[t.sigla] = t;
       });
       return { global, porTecnico };
     };
@@ -688,22 +720,27 @@ function useTablero() {
       try {
         const [tecnicos, rGlobal] = await Promise.all([
           api.obtenerTecnicos(),
-          api.obtenerKpisRango(ventana.desde, ventana.hasta),
+          api.obtenerKpisRango(periodo.desde, periodo.hasta),
         ]);
         if (!activo) return;
-        let b = { ventana, tecnicos, global: indexar(rGlobal.kpis || []).global, porTecnico: {}, tecnicosCargados: 0 };
+        let b = {
+          periodo: { desde: periodo.desde, hasta: periodo.hasta }, tecnicos,
+          global: indexar(rGlobal.kpis || []).global, totales: indexarTotales(rGlobal.totales || []).global,
+          porTecnico: {}, totalesPorTecnico: {}, tecnicosCargados: 0,
+        };
         BASE_ACTUAL = b;
         setBase(b);
         setServicio({ estado: "ok", error: null, actualizadoEn: new Date(), erroresKpi: siglasConError(rGlobal), errorDesglose: null });
 
         try {
-          const rTec = await api.obtenerKpisRango(ventana.desde, ventana.hasta, { porTecnico: true });
+          const rTec = await api.obtenerKpisRango(periodo.desde, periodo.hasta, { porTecnico: true });
           if (!activo) return;
           const { porTecnico } = indexar(rTec.kpis || []);
-          // Un técnico sin ninguna fila en la ventana igual queda "cargado"
+          const totalesPorTecnico = indexarTotales(rTec.totales || []).porTecnico;
+          // Un técnico sin ninguna fila en el período igual queda "cargado"
           // (vacío), para que el filtro no se quede esperando para siempre.
           tecnicos.forEach((t) => { porTecnico[t.id] = porTecnico[t.id] || {}; });
-          b = { ...b, porTecnico, tecnicosCargados: tecnicos.length };
+          b = { ...b, porTecnico, totalesPorTecnico, tecnicosCargados: tecnicos.length };
           BASE_ACTUAL = b;
           setBase(b);
           setServicio((s) => ({ ...s, erroresKpi: [...new Set([...(s.erroresKpi || []), ...siglasConError(rTec)])] }));
@@ -715,14 +752,15 @@ function useTablero() {
       }
     })();
     return () => { activo = false; };
-  }, [tick]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick, periodo && periodo.desde, periodo && periodo.hasta]);
 
   const datos = useMemo(() => {
     const mapa = {};
     INDICADORES.forEach((ind) => {
       const d = obtenerSerie(ind.id, rango, filtros, base);
-      // Los KPI de HU-24 traen su propio valor del período (suma de partes).
-      mapa[ind.id] = { ...d, valor: d.valorPeriodo !== undefined ? d.valorPeriodo : valorRepresentativo(ind, d.serie) };
+      // Valor del período: el total de la API (o la suma por zona, 4b).
+      mapa[ind.id] = { ...d, valor: d.valorPeriodo !== undefined ? d.valorPeriodo : null };
     });
     return mapa;
   }, [rango, filtros, base]);
@@ -730,7 +768,7 @@ function useTablero() {
   const cargando = servicio.estado === "cargando";
   return {
     rango, setRango, filtros, setFiltros, cargando, servicio, datos,
-    tecnicos: (base && base.tecnicos) || [], ventana: base && base.ventana,
+    tecnicos: (base && base.tecnicos) || [], ventana: VENTANA,
     desglose: base ? { cargados: base.tecnicosCargados, total: base.tecnicos.length } : null,
     recargar: () => setTick((t) => t + 1),
   };
