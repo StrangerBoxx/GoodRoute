@@ -803,19 +803,16 @@ function EstadoServicio({ servicio, desglose, onReintentar }) {
       </span>
     );
   }
-  const hora = servicio.actualizadoEn
-    ? String(servicio.actualizadoEn.getHours()).padStart(2, "0") + ":" + String(servicio.actualizadoEn.getMinutes()).padStart(2, "0")
-    : null;
+  // Con la carga terminada y sin avisos no se muestra nada (sin "Datos
+  // actualizados a las…"): solo lo que todavía carga o lo que falló.
   const avisos = [];
   if (servicio.erroresKpi && servicio.erroresKpi.length) avisos.push("GoodRoute no pudo calcular " + servicio.erroresKpi.join(", ") + " (por ejemplo, sin conexión a su base de datos)");
   if (servicio.errorDesglose) avisos.push("No se pudo cargar el desglose por técnico: " + servicio.errorDesglose);
+  const cargandoDesglose = desglose && desglose.cargados < desglose.total && !servicio.errorDesglose;
+  if (!cargandoDesglose && !avisos.length) return null;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: "6px 18px", fontSize: 12.5, color: "var(--text-3)" }}>
-      <span className="row-flex" style={{ gap: 6 }}>
-        <Icon name="checkC" style={{ width: 14, height: 14, color: "var(--green-fg)" }} />
-        Datos actualizados{hora ? " a las " + hora : ""}
-      </span>
-      {desglose && desglose.cargados < desglose.total && !servicio.errorDesglose && (
+      {cargandoDesglose && (
         <span className="row-flex" style={{ gap: 6 }}>
           <span className="rx-ring rx-ring-14" aria-hidden="true" />
           Cargando el desglose por técnico…
