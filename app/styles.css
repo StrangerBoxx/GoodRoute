@@ -454,7 +454,9 @@ a { color: inherit; text-decoration: none; }
 
 /* empty state */
 .empty { text-align: center; padding: 50px 20px; color: var(--text-3); }
-.empty svg { width: 34px; height: 34px; margin-bottom: 10px; color: var(--text-4); }
+/* El ícono va en su propia línea, centrado arriba del texto (en línea con
+   el texto quedaba pegado al comienzo de la frase, no al medio). */
+.empty svg { display: block; width: 34px; height: 34px; margin: 0 auto 10px; color: var(--text-4); }
 
 /* ---- Loading affordances ---- */
 .icon-spin { display: inline-flex; animation: spin .9s linear infinite; }
@@ -763,15 +765,19 @@ a { color: inherit; text-decoration: none; }
 .rx-tira-nav-btn:disabled { opacity: .35; cursor: not-allowed; }
 .rx-tira-nav-btn svg { width: 15px; height: 15px; }
 .rx-tira-mes { font-weight: 640; font-size: 14px; min-width: 230px; text-align: center; white-space: nowrap; }
-/* Resumen del día elegido (CAMBIO 3) — entre la navegación de semana y
-   los botones de Hoy/Ir a una fecha, en la misma cabecera de la tira. */
-.rx-tira-resumen { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 260px; min-width: 0; font-size: 13px; }
 .rx-tira-acciones { display: flex; align-items: center; gap: 8px; flex: none; }
 /* Encabezado de la verificación (HU-31): "<" + día destacado + datos de la corrida */
 .rx-verif-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
 .rx-verif-volver { flex: none; margin-top: 2px; }
 .rx-verif-dia { font-size: 20px; font-weight: 650; letter-spacing: -.3px; line-height: 1.3; }
 .rx-verif-dia::first-letter { text-transform: uppercase; }
+/* Pestañas del día debajo de la tira: "Por asignar" / "Confirmadas" */
+.rx-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.rx-tab { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; margin-bottom: -1px; font-size: 13.5px; font-weight: 600; color: var(--text-3); border-bottom: 2px solid transparent; transition: color .12s, border-color .12s; }
+.rx-tab:hover { color: var(--text); }
+.rx-tab.on { color: var(--text); border-bottom-color: var(--accent); }
+.rx-tab-n { font-size: 11.5px; font-weight: 700; padding: 1px 7px; border-radius: 10px; background: var(--surface-3); color: var(--text-2); }
+.rx-tab.on .rx-tab-n { background: var(--accent-soft); color: var(--accent-strong); }
 .rx-tira-dias { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
 
 .dia-card { flex: 1 1 0; min-width: 72px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 6px 9px; border-radius: var(--radius-sm); border: 1.5px solid var(--border); background: var(--surface); position: relative; cursor: pointer; transition: border-color .12s, background .12s, box-shadow .12s, opacity .12s; }
@@ -780,7 +786,6 @@ a { color: inherit; text-decoration: none; }
 .dia-card.selected { border-color: var(--accent); background: var(--accent-softer); box-shadow: 0 0 0 3px var(--accent-softer); }
 .dia-card.sin-ot { opacity: .55; }
 .dia-card:disabled { opacity: .3; cursor: not-allowed; }
-.dia-card-hoy { position: absolute; top: 4px; right: 4px; font-size: 8.5px; font-weight: 700; letter-spacing: .3px; color: var(--accent-strong); background: var(--accent-soft); padding: 1px 5px; border-radius: 6px; }
 .dia-card-dow { font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--text-3); }
 .dia-card-num { font-size: 19px; font-weight: 700; color: var(--text-2); }
 .dia-card.selected .dia-card-num { color: var(--accent-strong); }

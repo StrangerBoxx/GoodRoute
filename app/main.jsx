@@ -187,7 +187,6 @@ function App() {
   else if (route.screen === "settings") content = <Settings />;
   else if (route.screen === "profile") content = <Profile go={go} />;
   else if (route.screen === "rutasExterno") content = <RutasExternoScreen onToast={setToast} go={go} route={route} />;
-  else if (route.screen === "rutasExternoRegistro") content = <RegistroAsignacionesScreen go={go} fecha={route.params.fecha} />;
   else if (route.screen === "analisis") content = <DashboardAnalisisScreen />;
 
   if (!authed) {

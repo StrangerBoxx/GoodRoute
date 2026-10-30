@@ -102,8 +102,8 @@ function sumarDiasAFecha(iso, dias) {
   return fechaLocalISO(d);
 }
 // Lunes de la semana que contiene `iso` (semana empezando en lunes, como
-// pide el calendario — la tira de 7 días usa el mismo criterio para que
-// "saltar" desde el calendario a la tira sea consistente).
+// pide el calendario mensual; la tira de 7 días arranca en hoy, ver
+// TiraDias).
 function lunesDeSemana(iso) {
   const d = fechaDesdeISO(iso);
   const dow = d.getDay(); // 0=domingo … 6=sábado
@@ -219,6 +219,17 @@ function calcularOtIdsCambiados(propuesta, propuestaOriginal) {
   return cambiados;
 }
 
+// Al editar un plan confirmado, las OT cambiadas que piden motivo de
+// reprogramación: solo las que ORIGINALMENTE tenían técnico. Asignar una
+// que estaba en Pendientes no reprograma nada (nunca tuvo técnico), así que
+// no lo pide; una que se quita en esta misma edición y se vuelve a asignar,
+// sí (era una OT asignada).
+function otsQuePidenMotivo(propuesta, propuestaOriginal) {
+  const tecOriginal = tecnicoDeCadaOt(propuestaOriginal || propuesta);
+  return new Set(Array.from(calcularOtIdsCambiados(propuesta, propuestaOriginal))
+    .filter(id => tecOriginal[id] && tecOriginal[id] !== "pendientes"));
+}
+
 // Qué cambió en la ruta de UN técnico puntual respecto de la propuesta
 // original — para "Restablecer ruta" (botón + marca en la lista + texto
 // del diálogo de confirmación). A diferencia de calcularOtIdsCambiados
@@ -310,10 +321,12 @@ const MOTIVOS_REPROGRAMACION = [
 // tocada necesita su propio motivo, no uno solo para todo el plan. Sin
 // botón de cancelar: el cambio ya se aplicó en pantalla, lo único que
 // falta es documentar por qué.
+// El motivo se manda tal cual a GoodRoute, que solo acepta los valores de
+// MOTIVOS_REPROGRAMACION (con "Otro" incluido) y no tiene un campo para
+// texto libre: por eso no se pide detalle al elegir "Otro".
 function MotivoReprogramacionModal({ ot, onGuardar }) {
   const [motivo, setMotivo] = useState("");
-  const [otro, setOtro] = useState("");
-  const puedeGuardar = motivo && (motivo !== "Otro" || otro.trim());
+  const puedeGuardar = !!motivo;
   return (
     <div className="overlay">
       <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
@@ -331,16 +344,53 @@ function MotivoReprogramacionModal({ ot, onGuardar }) {
               {MOTIVOS_REPROGRAMACION.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
-          {motivo === "Otro" && (
-            <div className="field" style={{ marginTop: 12 }}>
-              <div className="field-label">Especifica el motivo</div>
-              <input className="field-input" value={otro} onChange={e => setOtro(e.target.value)} autoFocus />
-            </div>
-          )}
         </div>
         <div className="modal-foot">
-          <button className="btn btn-primary" disabled={!puedeGuardar} onClick={() => onGuardar(motivo === "Otro" ? otro.trim() : motivo)}>
+          <button className="btn btn-primary" disabled={!puedeGuardar} onClick={() => onGuardar(motivo)}>
             <Icon name="check" />Guardar motivo
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Estados de GoodRoute de una OT que ya se está ejecutando o está
+// terminada: "Descartar plan" no las desasigna.
+const OT_EN_EJECUCION = new Set(["enTerreno", "parcial", "finalizada"]);
+
+// Confirmación de "Descartar plan" (pestaña Confirmadas): desasigna todas
+// las OT del plan de ese día, que vuelven a "Por asignar". Pide un motivo,
+// uno solo para todas, que queda como motivo de reprogramación de cada OT
+// (mismos valores que MotivoReprogramacionModal, sin texto libre).
+function DescartarPlanModal({ fecha, totalOts, totalTecnicos, enEjecucion, onConfirmar, onCancelar }) {
+  const [motivo, setMotivo] = useState("");
+  const puedeConfirmar = !!motivo;
+  return (
+    <div className="overlay" onClick={onCancelar}>
+      <div className="modal" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">Descartar plan</div>
+            <div className="modal-sub">
+              La planificación del {fechaLarga(fecha)} se descartará. {totalOts === 1 ? "La OT quedará" : `Las ${totalOts} OT quedarán`} sin técnico y habrá que volver a asignar{totalOts === 1 ? "la" : "las"}.
+              {enEjecucion > 0 && ` ${enEjecucion === 1 ? "1 OT ya está" : `${enEjecucion} OT ya están`} en ejecución o terminada${enEjecucion === 1 ? "" : "s"} y no se toca${enEjecucion === 1 ? "" : "n"}.`}
+            </div>
+          </div>
+        </div>
+        <div className="modal-body">
+          <div className="field">
+            <div className="field-label">Motivo</div>
+            <select className="field-input" value={motivo} onChange={e => setMotivo(e.target.value)} autoFocus>
+              <option value="">Selecciona un motivo…</option>
+              {MOTIVOS_REPROGRAMACION.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn" onClick={onCancelar}>Cancelar</button>
+          <button className="btn btn-primary" disabled={!puedeConfirmar} onClick={() => onConfirmar(motivo)}>
+            Descartar plan
           </button>
         </div>
       </div>
@@ -387,14 +437,13 @@ function ConfirmarRestablecerModal({ tecnico, cambios, otrasRutasNombres, onConf
 }
 
 /* ---- Tarjeta de un día en la tira de 7 (CAMBIO 1) ---- */
-function DiaCard({ iso, seleccionado, esHoy, deshabilitado, confirmadas, porAsignar, onClick }) {
+function DiaCard({ iso, seleccionado, deshabilitado, confirmadas, porAsignar, onClick }) {
   const d = fechaDesdeISO(iso);
   const sinOt = confirmadas === 0 && porAsignar === 0;
   return (
     <button type="button" className={"dia-card" + (seleccionado ? " selected" : "") + (sinOt ? " sin-ot" : "")}
       disabled={deshabilitado} onClick={onClick}
-      title={`${fechaLarga(iso)} · ${textoEstadoDia(confirmadas, porAsignar)}`}>
-      {esHoy && <span className="dia-card-hoy">HOY</span>}
+      title={deshabilitado ? fechaLarga(iso) : `${fechaLarga(iso)} · ${textoEstadoDia(confirmadas, porAsignar)}`}>
       <div className="dia-card-dow">{DIAS_CORTOS[d.getDay()]}</div>
       <div className="dia-card-num">{d.getDate()}</div>
       {/* Las dos cosas a la vez si corresponde (ej. 13 confirmadas Y 5 por
@@ -407,7 +456,7 @@ function DiaCard({ iso, seleccionado, esHoy, deshabilitado, confirmadas, porAsig
         {porAsignar > 0 && (
           <span className="dia-card-estado-linea"><span className="dia-dot dia-dot-ambar" />{porAsignar} por asignar</span>
         )}
-        {sinOt && <span className="dia-card-estado-linea">sin OT</span>}
+        {sinOt && !deshabilitado && <span className="dia-card-estado-linea">sin OT</span>}
       </div>
     </button>
   );
@@ -461,7 +510,9 @@ function CalendarioPopover({ fecha, onSeleccionar, onCerrar, estadoDelDia, fecha
           const d = fechaDesdeISO(iso);
           const delMes = d.getMonth() === mes;
           const deshabilitado = iso < fechaMin || iso > fechaMax;
-          const { confirmadas, porAsignar } = estadoDelDia(iso);
+          // Un día fuera del rango (ej. un día pasado en "Planificar rutas")
+          // no muestra puntos: solo el número, deshabilitado.
+          const { confirmadas, porAsignar } = deshabilitado ? { confirmadas: 0, porAsignar: 0 } : estadoDelDia(iso);
           return (
             <button key={iso} type="button"
               className={"rx-calendario-dia" + (iso === fecha ? " selected" : "") + (iso === hoy ? " hoy" : "") + (!delMes ? " fuera-de-mes" : "")}
@@ -491,25 +542,33 @@ function CalendarioPopover({ fecha, onSeleccionar, onCerrar, estadoDelDia, fecha
    La fecha es el contexto de TODA la pantalla (selección y propuesta),
    no un campo más del formulario — por eso vive en RutasExternoScreen,
    arriba de ambos paneles, en vez de adentro de SeleccionPanel. */
-function TiraDias({ fecha, onSeleccionar, estadoDelDia, fechaMin, fechaMax, conResumen = true, otsPorAsignarCount, tecnicosCount, totalConfirmadas, onVerConfirmadas }) {
-  const [anchor, setAnchor] = useState(() => lunesDeSemana(fecha));
-  const [calAbierto, setCalAbierto] = useState(false);
-  const hoy = window.RUTAS_EXTERNO_API.hoyISO();
-  const esHoy = fecha === hoy;
-  const confirmado = totalConfirmadas > 0;
+// Cantidad de días que muestra la tira de una vez.
+const DIAS_VISIBLES_TIRA = 7;
 
-  // Si la fecha seleccionada cambia desde afuera (botón "Hoy", calendario,
-  // o entrar directo a editar un día confirmado) y cae fuera de la
-  // semana visible, la tira se corre sola hasta esa semana — nunca puede
-  // quedar una tira que no incluya el día seleccionado.
+function TiraDias({ fecha, onSeleccionar, estadoDelDia, fechaMin, fechaMax }) {
+  // La tira arranca en el primer día planificable (fechaMin, mañana) y se
+  // desliza de a un día: si la fecha elegida queda después del último día
+  // visible, ese día pasa a ser el último (los anteriores siguen a la
+  // vista); si queda antes del primero, pasa a ser el primero. Nunca
+  // muestra días antes de fechaMin.
+  const ultimo = DIAS_VISIBLES_TIRA - 1;
+  const ajustarInicio = (inicio) => {
+    if (fecha > sumarDiasAFecha(inicio, ultimo)) inicio = sumarDiasAFecha(fecha, -ultimo);
+    else if (fecha < inicio) inicio = fecha;
+    return inicio < fechaMin ? fechaMin : inicio;
+  };
+  const [anchor, setAnchor] = useState(() => ajustarInicio(fechaMin));
+  const [calAbierto, setCalAbierto] = useState(false);
+
+  // Cada vez que cambia la fecha (flechas, calendario o entrar directo a
+  // editar un día) la tira se corre lo justo para que el día elegido
+  // quede a la vista.
   useEffect(() => {
-    const fin = sumarDiasAFecha(anchor, 6);
-    if (fecha < anchor || fecha > fin) setAnchor(lunesDeSemana(fecha));
+    setAnchor(ajustarInicio);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fecha]);
 
-  const dias = Array.from({ length: 7 }, (_, i) => sumarDiasAFecha(anchor, i));
-  const fin = dias[6];
+  const dias = Array.from({ length: DIAS_VISIBLES_TIRA }, (_, i) => sumarDiasAFecha(anchor, i));
 
   const irAFecha = iso => { onSeleccionar(iso); setCalAbierto(false); };
 
@@ -528,28 +587,12 @@ function TiraDias({ fecha, onSeleccionar, estadoDelDia, fechaMin, fechaMax, conR
           </button>
         </div>
 
-        {/* Resumen del día elegido (CAMBIO 3) — vive acá, en la misma
-            cabecera que la navegación y el calendario, no en una franja
-            aparte debajo de la tira. El día ya se dice arriba, en
-            rx-tira-mes — acá solo lo que hay ese día. No aplica en
-            pantallas que solo usan la tira como selector de fecha (ej.
-            "Rutas confirmadas", que ya tiene su propio resumen de
-            resultados más abajo) — ahí conResumen=false y este bloque se
-            reemplaza por un espaciador para que Hoy/Ir a una fecha sigan
-            quedando a la derecha. */}
-        {conResumen ? (
-          <div className="rx-tira-resumen">
-            <span className="cell-muted">
-              {confirmado
-                ? `${totalConfirmadas} OT ya asignada${totalConfirmadas === 1 ? "" : "s"}`
-                : `${otsPorAsignarCount} OT sin asignar · ${tecnicosCount} técnicos disponibles`}
-            </span>
-            {confirmado && <button className="btn btn-sm" onClick={onVerConfirmadas}>Ver / Editar</button>}
-          </div>
-        ) : <div style={{ flex: 1 }} />}
+        {/* Lo que hay ese día lo dicen las pestañas debajo de la tira:
+            acá solo un espaciador, para que "Ir a una fecha" quede a la
+            derecha. Sin botón "Hoy": hoy no se planifica. */}
+        <div style={{ flex: 1 }} />
 
         <div className="rx-tira-acciones">
-          <button type="button" className="btn btn-sm" disabled={esHoy} onClick={() => onSeleccionar(hoy)}>Hoy</button>
           <div style={{ position: "relative" }}>
             <button type="button" className="btn btn-sm" aria-expanded={calAbierto}
               onClick={e => { e.stopPropagation(); setCalAbierto(v => !v); }}>
@@ -564,10 +607,14 @@ function TiraDias({ fecha, onSeleccionar, estadoDelDia, fechaMin, fechaMax, conR
       </div>
       <div className="rx-tira-dias">
         {dias.map(iso => {
-          const { confirmadas, porAsignar } = estadoDelDia(iso);
+          // Un día fuera del rango (los pasados, en las dos pantallas que
+          // usan la tira) se ve atenuado y sin conteos: solo día y número,
+          // sin lo que ya se trabajó en él.
+          const deshabilitado = iso < fechaMin || iso > fechaMax;
+          const { confirmadas, porAsignar } = deshabilitado ? { confirmadas: 0, porAsignar: 0 } : estadoDelDia(iso);
           return (
-            <DiaCard key={iso} iso={iso} seleccionado={iso === fecha} esHoy={iso === hoy}
-              deshabilitado={iso < fechaMin || iso > fechaMax}
+            <DiaCard key={iso} iso={iso} seleccionado={iso === fecha}
+              deshabilitado={deshabilitado}
               confirmadas={confirmadas} porAsignar={porAsignar}
               onClick={() => onSeleccionar(iso)} />
           );
@@ -580,7 +627,7 @@ function TiraDias({ fecha, onSeleccionar, estadoDelDia, fechaMin, fechaMax, conR
 // Confirmación antes de salir de la verificación con una planificación
 // sin confirmar (botón "<" junto al día) — volver a la selección la
 // descarta, así que se avisa antes en vez de perderla en silencio.
-function ConfirmarDescartarModal({ fecha, esReedicion, destino = "a la selección", onConfirmar, onCancelar }) {
+function ConfirmarDescartarModal({ fecha, esReedicion, onConfirmar, onCancelar }) {
   return (
     <div className="overlay" onClick={onCancelar}>
       <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
@@ -589,8 +636,8 @@ function ConfirmarDescartarModal({ fecha, esReedicion, destino = "a la selecció
             <div className="modal-title">{esReedicion ? "Descartar cambios" : "Descartar planificación"}</div>
             <div className="modal-sub">
               {esReedicion
-                ? `Los cambios a la planificación confirmada del ${fechaLarga(fecha)} todavía no se guardaron. Si volvés ${destino}, se descartan y la planificación confirmada queda como estaba.`
-                : `La planificación del ${fechaLarga(fecha)} todavía no está confirmada. Si volvés ${destino}, se descarta.`}
+                ? `Los cambios a la planificación confirmada del ${fechaLarga(fecha)} todavía no se guardaron. Si volvés, se descartan y la planificación confirmada queda como estaba.`
+                : `La planificación del ${fechaLarga(fecha)} todavía no está confirmada. Si volvés a la selección, se descarta.`}
             </div>
           </div>
         </div>
@@ -966,7 +1013,18 @@ function RxMetric({ value, label }) {
 }
 
 /* ---- Panel de detalle: la ruta del técnico seleccionado, y solo esa (HU-03) ---- */
-function TecnicoRouteDetail({ tecnico, paradas, otrosTecnicos, recalculando, otIdsCambiados, teniaRutaOriginal, errorTecnico, cambios, otrasRutasNombres, onMoveUp, onMoveDown, onMover, onEliminar, onRestablecer }) {
+// Ordena en el lugar las paradas de una ruta por hora programada; las que
+// no tienen hora van al final, en el orden en que estaban.
+function ordenarPorHora(paradas) {
+  return paradas.sort((a, b) => {
+    if (!a.horaProgramada || !b.horaProgramada) return (a.horaProgramada ? 0 : 1) - (b.horaProgramada ? 0 : 1);
+    return a.horaProgramada.localeCompare(b.horaProgramada);
+  });
+}
+
+// `ordenPorHora` (editando un plan confirmado): sin flechas de subir/bajar,
+// la ruta queda siempre por hora programada.
+function TecnicoRouteDetail({ tecnico, paradas, otrosTecnicos, recalculando, otIdsCambiados, teniaRutaOriginal, errorTecnico, cambios, otrasRutasNombres, ordenPorHora, onMoveUp, onMoveDown, onMover, onEliminar, onRestablecer }) {
   const [menuFor, setMenuFor] = useState(null);
   const [confirmandoReset, setConfirmandoReset] = useState(false);
 
@@ -1024,9 +1082,14 @@ function TecnicoRouteDetail({ tecnico, paradas, otrosTecnicos, recalculando, otI
               una sola OT, 1ª y última son la misma: se muestra una sola
               hora en vez de un rango "09:00–09:00". */}
           <RxMetric value={paradas.length} label="Paradas" />
+          {/* Sin paradas (se le quitó la última OT) no hay ventana: el
+              detalle se dibuja un instante así antes de pasar a otro
+              técnico, y leer paradas[0] ahí dejaba la pantalla en blanco. */}
           <RxMetric
             value={
-              paradas.length === 1
+              paradas.length === 0
+                ? null
+                : paradas.length === 1
                 ? (paradas[0].horaProgramada ? horaVista(paradas[0].horaProgramada) : null)
                 : (paradas[0].horaProgramada || paradas[paradas.length - 1].horaProgramada)
                   ? `${paradas[0].horaProgramada ? horaVista(paradas[0].horaProgramada) : "—"}–${paradas[paradas.length - 1].horaProgramada ? horaVista(paradas[paradas.length - 1].horaProgramada) : "—"}`
@@ -1091,8 +1154,12 @@ function TecnicoRouteDetail({ tecnico, paradas, otrosTecnicos, recalculando, otI
                     (aplicarYRecalcular arranca del `propuesta` que tenía
                     en memoria al momento del clic, no del que quedó
                     después del primer cambio). */}
-                <button className="btn btn-sm" disabled={i === 0 || recalculando} onClick={() => onMoveUp(tecnico.id, ot.id)} title="Subir"><Icon name="chevD" style={{ transform: "rotate(180deg)" }} /></button>
-                <button className="btn btn-sm" disabled={i === paradas.length - 1 || recalculando} onClick={() => onMoveDown(tecnico.id, ot.id)} title="Bajar"><Icon name="chevD" /></button>
+                {!ordenPorHora && (
+                  <>
+                    <button className="btn btn-sm" disabled={i === 0 || recalculando} onClick={() => onMoveUp(tecnico.id, ot.id)} title="Subir"><Icon name="chevD" style={{ transform: "rotate(180deg)" }} /></button>
+                    <button className="btn btn-sm" disabled={i === paradas.length - 1 || recalculando} onClick={() => onMoveDown(tecnico.id, ot.id)} title="Bajar"><Icon name="chevD" /></button>
+                  </>
+                )}
                 <div style={{ position: "relative" }}>
                   <button className="btn btn-sm" disabled={otrosTecnicos.length === 0 || recalculando}
                     title={recalculando ? "Esperá a que termine de actualizar" : otrosTecnicos.length === 0 ? "No hay otro técnico en esta propuesta para moverla" : "Mover a otro técnico"}
@@ -1177,25 +1244,28 @@ function PendienteRow({ ot, tecnicos, onMover, cambiada, deshabilitado }) {
    solo se prestaba a cambiar de día sin querer), con "<" a la izquierda
    para volver a la selección (previa confirmación, ver
    ConfirmarDescartarModal) y, debajo, los datos de la corrida. ---- */
-function EncabezadoVerificacion({ fecha, resumen, pendientesCount, deshabilitado, onVolver, tituloVolver = "Volver a la selección" }) {
+function EncabezadoVerificacion({ fecha, resumen, pendientesCount, deshabilitado, onVolver }) {
   // Contador EN VIVO de pendientes (cambia al mover OT a mano, a
   // diferencia del resumen de la corrida) — siempre a la vista, y lleva
   // directo al panel Pendientes, que queda al final de la pantalla.
   const irAPendientes = () => document.getElementById("rx-pendientes")?.scrollIntoView({ behavior: "smooth", block: "start" });
   return (
     <div className="rx-verif-head">
-      <button type="button" className="rx-tira-nav-btn rx-verif-volver" aria-label={tituloVolver}
-        title={tituloVolver} disabled={deshabilitado} onClick={onVolver}>
+      <button type="button" className="rx-tira-nav-btn rx-verif-volver" aria-label="Volver"
+        title="Volver" disabled={deshabilitado} onClick={onVolver}>
         <Icon name="chevR" style={{ transform: "rotate(180deg)" }} />
       </button>
       <div style={{ minWidth: 0 }}>
         <div className="rx-verif-dia">{fechaLargaConAnio(fecha)}</div>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: 18, rowGap: 6, marginTop: 4 }}>
-          <button type="button" className={"badge rx-pendientes-chip " + (pendientesCount > 0 ? "b-amber" : "b-green")} onClick={irAPendientes}
-            title="Ir al panel Pendientes">
-            <Icon name={pendientesCount > 0 ? "alert" : "checkC"} />
-            {pendientesCount > 0 ? `${pendientesCount} OT pendiente${pendientesCount === 1 ? "" : "s"}` : "Sin pendientes"}
-          </button>
+          {/* Solo cuando hay algo pendiente: "Sin pendientes" no aporta. */}
+          {pendientesCount > 0 && (
+            <button type="button" className="badge rx-pendientes-chip b-amber" onClick={irAPendientes}
+              title="Ir al panel Pendientes">
+              <Icon name="alert" />
+              {pendientesCount} OT pendiente{pendientesCount === 1 ? "" : "s"}
+            </button>
+          )}
           <ResumenCorrida resumen={resumen} />
         </div>
       </div>
@@ -1280,7 +1350,7 @@ function PropuestaPanel({ propuesta, propuestaOriginal, error, recalculando, err
   const hayRecalculando = !!(recalculando && Object.values(recalculando).some(Boolean));
 
   const otsFaltanMotivo = esReedicion
-    ? Array.from(otIdsCambiados).filter(id => !(motivosPorOt && motivosPorOt[id])).length
+    ? Array.from(otsQuePidenMotivo(propuesta, propuestaOriginal)).filter(id => !(motivosPorOt && motivosPorOt[id])).length
     : 0;
   // Qué cambió en la ruta de CADA técnico respecto del original — para la
   // marca en la lista maestra y para habilitar/explicar "Restablecer
@@ -1325,7 +1395,9 @@ function PropuestaPanel({ propuesta, propuestaOriginal, error, recalculando, err
         <div className="rx-master-detail">
           <TecnicoRouteList tecIds={tecIdsConTarjeta} propuesta={propuesta} selectedId={selectedTecId} onSelect={setSelectedTecId}
             cambiosPorTecnico={cambiosPorTecnico} teniaRutaOriginalPorTecnico={teniaRutaOriginalPorTecnico} />
-          {selectedTecId && propuesta.porTecnico[selectedTecId] && (() => {
+          {/* Solo un técnico con OT: si se le quitó la última, el efecto de
+              arriba pasa al siguiente — mientras tanto no se dibuja. */}
+          {selectedTecId && tecIdsConTarjeta.includes(selectedTecId) && (() => {
             const { tecnico, paradas } = propuesta.porTecnico[selectedTecId];
             // Para "Mover" se ofrecen TODOS los técnicos de la propuesta
             // (no solo los que ya tienen ruta armada) — así una OT se
@@ -1340,7 +1412,7 @@ function PropuestaPanel({ propuesta, propuestaOriginal, error, recalculando, err
             const cambios = cambiosPorTecnico[selectedTecId];
             const otrasRutasNombres = (cambios?.otrasRutasAfectadas || []).map(id => propuesta.porTecnico[id]?.tecnico.nombre).filter(Boolean);
             return (
-              <TecnicoRouteDetail tecnico={tecnico} paradas={paradas} otrosTecnicos={otros}
+              <TecnicoRouteDetail tecnico={tecnico} paradas={paradas} otrosTecnicos={otros} ordenPorHora={esReedicion}
                 recalculando={!!(recalculando && recalculando[selectedTecId])} otIdsCambiados={otIdsCambiados}
                 teniaRutaOriginal={!!teniaRutaOriginalPorTecnico[selectedTecId]}
                 errorTecnico={erroresTecnico && erroresTecnico[selectedTecId]}
@@ -1476,6 +1548,8 @@ function RegistroRutaCard({ ruta }) {
   const paradas = (ruta.paradas || ruta.ordenes_asignadas || []).map((p, i) => ({
     id: p.ot_id || p.id || `parada-${i}`,
     direccion: p.direccion,
+    calle: p.calle || p.direccion,
+    comuna: p.comuna || null,
     lat: p.latitud ?? p.lat,
     lng: p.longitud ?? p.lng,
     // Hora PROGRAMADA real de la OT (fija) — no la estimada de llegada,
@@ -1487,7 +1561,7 @@ function RegistroRutaCard({ ruta }) {
   const base = (ruta.base_latitud != null && ruta.base_longitud != null)
     ? { lat: ruta.base_latitud, lng: ruta.base_longitud } : null;
 
-  const [mapa, setMapa] = useState({ abierto: false, estado: "inicial", geometria: null, error: null });
+  const [mapa, setMapa] = useState({ abierto: false, estado: "inicial", geometria: null, ubicadas: [], sinUbicar: 0, error: null });
   // Las paradas se ven de entrada; la flecha las pliega para dejar solo el
   // resumen de la ruta (técnico, horario, km, cantidad de OT).
   const [detalleAbierto, setDetalleAbierto] = useState(true);
@@ -1497,10 +1571,21 @@ function RegistroRutaCard({ ruta }) {
     if (mapa.estado === "ok") { setMapa(m => ({ ...m, abierto: true })); return; }
     setMapa(m => ({ ...m, abierto: true, estado: "cargando", error: null }));
     try {
-      const puntos = [...(base ? [base] : []), ...paradas.filter(p => p.lat != null && p.lng != null)];
-      if (puntos.length < 2) throw new Error("No hay suficientes puntos con coordenadas para trazar la ruta.");
-      const geometria = await window.RUTAS_EXTERNO_API.obtenerGeometriaRuta(puntos);
-      setMapa({ abierto: true, estado: "ok", geometria, error: null });
+      // GoodRoute no guarda coordenadas de las OT: las que no las traen se
+      // ubican por su dirección (en paralelo). Las que no se pueden ubicar
+      // quedan fuera del mapa y se avisa cuántas.
+      const conCoords = await Promise.all(paradas.map(async p => {
+        if (p.lat != null && p.lng != null) return p;
+        if (!p.calle) return null;
+        const c = await window.RUTAS_EXTERNO_API.geocodificarDireccion(p.calle, p.comuna).catch(() => null);
+        return c ? { ...p, ...c } : null;
+      }));
+      const ubicadas = conCoords.filter(Boolean);
+      const puntos = [...(base ? [base] : []), ...ubicadas];
+      if (puntos.length === 0) throw new Error("No se pudo ubicar ninguna dirección de esta ruta.");
+      // Con un solo punto no hay trayecto que trazar: se muestra el pin solo.
+      const geometria = puntos.length > 1 ? await window.RUTAS_EXTERNO_API.obtenerGeometriaRuta(puntos) : null;
+      setMapa({ abierto: true, estado: "ok", geometria, ubicadas, sinUbicar: paradas.length - ubicadas.length, error: null });
     } catch (err) {
       setMapa(m => ({ ...m, estado: "error", error: err.message }));
     }
@@ -1570,56 +1655,43 @@ function RegistroRutaCard({ ruta }) {
               <Icon name="alert" style={{ width: 14, height: 14 }} />No se pudo trazar la ruta: {mapa.error}
             </div>
           )}
-          {mapa.estado === "ok" && <MapaRuta base={base} paradas={paradas} geometria={mapa.geometria} />}
+          {mapa.estado === "ok" && (
+            <>
+              {mapa.sinUbicar > 0 && (
+                <div className="cell-muted" style={{ fontSize: 12, color: "var(--amber-fg)", padding: "0 0 8px", display: "flex", alignItems: "center", gap: 6 }}>
+                  <Icon name="alert" style={{ width: 13, height: 13 }} />
+                  {mapa.sinUbicar === 1 ? "1 OT no se pudo ubicar y no aparece en el mapa." : `${mapa.sinUbicar} OT no se pudieron ubicar y no aparecen en el mapa.`}
+                </div>
+              )}
+              <MapaRuta base={base} paradas={mapa.ubicadas} geometria={mapa.geometria} />
+            </>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// Consulta bajo demanda (no se auto-carga al entrar al módulo, para no
-// sumar una llamada de red en cada visita cuando normalmente no hay nada
-// que ver todavía). HU-18 criterio 3 y 4: consultable sin salir de acá,
-// y un error de red se comunica, no se confunde con "no hay registros".
-function RegistroAsignaciones({ fechaConsulta, setFechaConsulta, go }) {
+// Pestaña "Confirmadas" de "Planificar rutas": las rutas ya confirmadas del
+// día elegido en la tira, tal como están en GoodRoute (HU-18 criterio 3 y
+// 4: consultable sin salir de acá, y un error de red se comunica, no se
+// confunde con "no hay registros"). Antes era una pantalla aparte con su
+// propia tira de días. `recarga` cambia después de cada confirmación, para
+// volver a consultar.
+function RutasConfirmadasDia({ fecha, recarga, error: avisoError, puedeEditar, onEditar, onDescartar }) {
   const [estado, setEstado] = useState("cargando"); // cargando | ok | error
   const [rutas, setRutas] = useState([]);
   const [error, setError] = useState(null);
 
-  // Sin botón "Consultar": al elegir un día en la tira (o al entrar),
-  // se consulta solo — mismo criterio que "Planificar rutas", donde
-  // cambiar de día ya recarga sin un paso extra.
   useEffect(() => {
     let activo = true;
     setEstado("cargando");
     setError(null);
-    window.RUTAS_EXTERNO_API.obtenerRutasRegistradas(fechaConsulta)
+    window.RUTAS_EXTERNO_API.obtenerRutasRegistradas(fecha)
       .then(data => { if (activo) { setRutas(Array.isArray(data) ? data : []); setEstado("ok"); } })
       .catch(err => { if (activo) { setError(err.message); setEstado("error"); } });
     return () => { activo = false; };
-  }, [fechaConsulta]);
-
-  // Rango navegable en la tira/calendario de esta pantalla: a diferencia
-  // de "Planificar rutas" (que solo mira hacia adelante, hoy..hoy+13),
-  // acá se consultan rutas YA confirmadas, así que tiene que poder
-  // mirar hacia atrás — 90 días es un margen generoso sin dejarlo sin
-  // límite. El tope hacia adelante es el mismo que el de planificación:
-  // no se puede haber confirmado nada más allá de esa ventana.
-  const fechaMin = sumarDiasAFecha(window.RUTAS_EXTERNO_API.hoyISO(), -90);
-  const fechaMax = window.RUTAS_EXTERNO_API.sumarDiasISO(13);
-
-  // Punto verde de la tira/calendario acá: lee directo de sessionStorage
-  // (mismo criterio que puedeEditar más abajo) — esta pantalla es una
-  // ruta aparte de "Planificar rutas", sin ese estado en memoria, y
-  // reconstruir cada día contra el backend sería una llamada por celda
-  // del calendario. Por eso no hay punto ámbar acá (no hay de dónde
-  // sacar "OT por asignar" sin ese mismo costo).
-  const estadoDelDiaLocal = iso => {
-    const confirmadosLocal = rxLoad(RX_KEYS.confirmados, {});
-    const c = confirmadosLocal[iso];
-    const confirmadas = c ? Object.values(c.porTecnico).reduce((s, { paradas }) => s + (paradas || []).length, 0) : 0;
-    return { confirmadas, porAsignar: 0 };
-  };
+  }, [fecha, recarga]);
 
   // El backend puede devolver un técnico incluido en la corrida sin
   // ninguna parada asignada — eso no es una "asignación registrada" para
@@ -1633,73 +1705,80 @@ function RegistroAsignaciones({ fechaConsulta, setFechaConsulta, go }) {
   // número en vez de simplemente no tenerlo.
   const hayDistancias = rutasConParadas.some(r => r.distancia_total_km != null);
   const kmTotal = rutasConParadas.reduce((sum, r) => sum + (r.distancia_total_km || 0), 0);
-
-  // "Editar" manda a la sección de edición de "Planificar rutas" (ver
-  // onEditarConfirmado en RutasExternoScreen) — solo tiene de dónde partir
-  // si ese plan se confirmó EN ESTA MISMA SESIÓN (confirmados vive en
-  // sessionStorage, no hay un fetch del plan editable desde el backend
-  // todavía). Se lee directo de sessionStorage porque esta pantalla es
-  // una ruta aparte de "Planificar rutas", sin ese estado en memoria.
-  const puedeEditar = useMemo(() => {
-    const confirmados = rxLoad(RX_KEYS.confirmados, {});
-    const c = confirmados[fechaConsulta];
-    return !!(c && Object.values(c.porTecnico || {}).some(({ paradas }) => (paradas || []).length > 0));
-  }, [fechaConsulta, estado]);
+  // Lo que "Descartar plan" puede desasignar: todo menos lo que ya se está
+  // ejecutando o está terminado.
+  const paradasDelDia = rutasConParadas.flatMap(r => (r.paradas || []).map(p => ({ ...p, tecnico_id: r.tecnico_id })));
+  const descartables = paradasDelDia.filter(p => !OT_EN_EJECUCION.has(p.estado));
+  const descartar = () => onDescartar({
+    otIds: descartables.map(p => p.ot_id),
+    totalTecnicos: new Set(descartables.map(p => p.tecnico_id)).size,
+    enEjecucion: paradasDelDia.length - descartables.length,
+  });
 
   return (
-    <div className="card card-pad" style={{ marginBottom: 16 }}>
-      <TiraDias fecha={fechaConsulta} onSeleccionar={setFechaConsulta} estadoDelDia={estadoDelDiaLocal}
-        fechaMin={fechaMin} fechaMax={fechaMax} conResumen={false} />
+    <>
+      {/* El aviso de la última confirmación (ej. OT que no se pudieron
+          guardar) se ve también acá: al confirmar, la pantalla puede
+          quedar en esta pestaña. */}
+      {avisoError && (
+        <div className="card" style={{ borderColor: "var(--red-fg)", background: "var(--accent-softer)", display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", marginBottom: 16 }}>
+          <Icon name="alert" style={{ width: 18, height: 18, color: "var(--red-fg)", flex: "none" }} />
+          <span>{avisoError}</span>
+        </div>
+      )}
+      <div className="card card-pad" style={{ marginBottom: 16 }}>
+        {estado === "ok" && rutasConParadas.length > 0 && (
+          <div className="row-flex" style={{ gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+            <span className="cell-muted" style={{ fontSize: 12.5 }}>
+              <b style={{ color: "var(--text)" }}>{rutasConParadas.length}</b> ruta(s) · <b style={{ color: "var(--text)" }}>{totalOts}</b> OT{hayDistancias && <> · <b style={{ color: "var(--text)" }}>{kmTotal.toFixed(1)}</b> km en total</>}
+            </span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+              {puedeEditar && (
+                <button className="btn btn-sm" onClick={onEditar}>
+                  <Icon name="edit" />Editar plan
+                </button>
+              )}
+              <button className="btn btn-sm" style={{ color: "var(--red-fg)" }} disabled={descartables.length === 0}
+                title={descartables.length === 0 ? "Todas las OT de este plan ya están en ejecución o terminadas" : "Borra toda la planificación de este día"}
+                onClick={descartar}>
+                <Icon name="x" />Descartar plan
+              </button>
+            </div>
+          </div>
+        )}
 
-      {estado === "ok" && rutasConParadas.length > 0 && (
-        <div className="row-flex" style={{ gap: 10, flexWrap: "wrap", marginTop: 14 }}>
-          <span className="cell-muted" style={{ fontSize: 12.5 }}>
-            <b style={{ color: "var(--text)" }}>{rutasConParadas.length}</b> ruta(s) · <b style={{ color: "var(--text)" }}>{totalOts}</b> OT{hayDistancias && <> · <b style={{ color: "var(--text)" }}>{kmTotal.toFixed(1)}</b> km en total</>}
-          </span>
-          <button className="btn btn-sm" style={{ marginLeft: "auto" }} disabled={!puedeEditar}
-            title={puedeEditar ? "Ir a editar este plan" : "Este plan no se confirmó en esta sesión"}
-            onClick={() => go("rutasExterno", { editarFecha: fechaConsulta })}>
-            <Icon name="edit" />Editar
-          </button>
-        </div>
-      )}
-
-      {estado === "cargando" && (
-        <div className="empty" style={{ marginTop: 14 }}><span className="rx-ring" aria-hidden="true" />Consultando…</div>
-      )}
-      {estado === "error" && (
-        <div className="cell-muted" style={{ marginTop: 12, color: "var(--red-fg)", display: "flex", alignItems: "center", gap: 7 }}>
-          <Icon name="alert" style={{ width: 14, height: 14 }} />No se pudo consultar el registro: {error}
-        </div>
-      )}
-      {estado === "ok" && rutasConParadas.length === 0 && (
-        <div className="empty"><Icon name="inbox" />No hay rutas confirmadas para el {fechaDDMMYYYY(fechaConsulta)}.</div>
-      )}
-      {estado === "ok" && rutasConParadas.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          {rutasConParadas.map((r, i) => <RegistroRutaCard key={r.tecnico_id || i} ruta={r} />)}
-        </div>
-      )}
-    </div>
+        {estado === "cargando" && (
+          <div className="empty" role="status" aria-label="Consultando…"><span className="rx-ring rx-ring-18" aria-hidden="true" /></div>
+        )}
+        {estado === "error" && (
+          <div className="cell-muted" style={{ color: "var(--red-fg)", display: "flex", alignItems: "center", gap: 7 }}>
+            <Icon name="alert" style={{ width: 14, height: 14 }} />No se pudo consultar el registro: {error}
+          </div>
+        )}
+        {estado === "ok" && rutasConParadas.length === 0 && (
+          <div className="empty"><Icon name="inbox" />No hay rutas confirmadas para el {fechaDDMMYYYY(fecha)}.</div>
+        )}
+        {estado === "ok" && rutasConParadas.length > 0 && (
+          rutasConParadas.map((r, i) => <RegistroRutaCard key={r.tecnico_id || i} ruta={r} />)
+        )}
+      </div>
+    </>
   );
 }
 
-/* ---- Pantalla propia para consultar las rutas ya confirmadas (antes
-   vivía inline arriba de "Planificar rutas"; ahora es una pantalla
-   aparte, a la que se entra con el botón "Rutas confirmadas") ---- */
-// Abre en el día que se estaba viendo en "Planificar rutas" (params.fecha;
-// sin fecha, en hoy) y al volver le devuelve el día que quedó elegido acá.
-function RegistroAsignacionesScreen({ go, fecha }) {
-  const [fechaConsulta, setFechaConsulta] = useState(fecha || window.RUTAS_EXTERNO_API.hoyISO());
+// Pestañas debajo de la tira de días: lo que falta asignar ese día y lo que
+// ya está confirmado. Los números son los mismos que muestra la tira.
+function PestanasDia({ pestana, onCambiar, porAsignar, confirmadas }) {
+  const tab = (id, texto, n) => (
+    <button type="button" role="tab" aria-selected={pestana === id}
+      className={"rx-tab" + (pestana === id ? " on" : "")} onClick={() => onCambiar(id)}>
+      {texto}<span className="rx-tab-n">{n}</span>
+    </button>
+  );
   return (
-    <div className="page fade-in">
-      <a className="back-link back-link-accent" onClick={() => go("rutasExterno", { fecha: fechaConsulta })}><Icon name="arrowL" />Volver a planificar rutas</a>
-      <div className="page-head">
-        <div>
-          <div className="page-title">Rutas confirmadas</div>
-        </div>
-      </div>
-      <RegistroAsignaciones fechaConsulta={fechaConsulta} setFechaConsulta={setFechaConsulta} go={go} />
+    <div className="rx-tabs" role="tablist" aria-label="OT del día">
+      {tab("porAsignar", "Por asignar", porAsignar)}
+      {tab("confirmadas", "Confirmadas", confirmadas)}
     </div>
   );
 }
@@ -1735,21 +1814,17 @@ function fusionarPorTecnico(previo, nuevo) {
 
 /* ---- Pantalla raíz: orquesta selección → propuesta → confirmación ---- */
 function RutasExternoScreen({ onToast, go, route }) {
-  // Día que se está planificando — no tiene que ser forzosamente "hoy"
-  // (el selector permite hasta 13 días hacia adelante). Se persiste para
-  // no perderlo si solo cambiaste de pantalla. Al volver de "Rutas
-  // confirmadas" llega el día que se miraba ahí (params.fecha) y se usa si
-  // cae en el rango planificable; si es un día pasado, queda el de antes.
-  const [fecha, setFecha] = useState(() => {
-    const api = window.RUTAS_EXTERNO_API;
-    const desdeRegistro = route?.params?.fecha;
-    if (desdeRegistro && desdeRegistro >= api.hoyISO() && desdeRegistro <= api.sumarDiasISO(13)) return desdeRegistro;
-    return rxLoad(RX_KEYS.fecha, null) || api.hoyISO();
-  });
-  // Rango navegable en la tira/calendario — igual al que ya tenía el
-  // selector de fecha anterior (hoy .. hoy+13).
-  const fechaMin = window.RUTAS_EXTERNO_API.hoyISO();
+  // Rango navegable en la tira/calendario: se planifica desde MAÑANA (el
+  // día en curso ya está en ejecución) hasta hoy+13.
+  const fechaMin = window.RUTAS_EXTERNO_API.sumarDiasISO(1);
   const fechaMax = window.RUTAS_EXTERNO_API.sumarDiasISO(13);
+  // Día que se está planificando. Se persiste para no perderlo si solo
+  // cambiaste de pantalla; si lo guardado ya quedó antes de mañana (ej. una
+  // sesión de ayer), arranca en mañana.
+  const [fecha, setFecha] = useState(() => {
+    const guardada = rxLoad(RX_KEYS.fecha, null);
+    return guardada && guardada >= fechaMin ? guardada : fechaMin;
+  });
   // Aviso de "se va a descartar la planificación" abierto (botón "<" de
   // la verificación, ver onPedirVolver/ConfirmarDescartarModal).
   const [confirmandoDescarte, setConfirmandoDescarte] = useState(false);
@@ -1759,6 +1834,8 @@ function RutasExternoScreen({ onToast, go, route }) {
   // disponibles el día elegido (tecnicosDisponibles, más abajo).
   const [tecnicosTodos, setTecnicosTodos] = useState([]);
   const [otsDelDiaCrudo, setOtsDelDiaCrudo] = useState([]);
+  // Se incrementa al confirmar, para volver a pedir las OT por asignar.
+  const [recargaOts, setRecargaOts] = useState(0);
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState(null);
 
@@ -1815,7 +1892,7 @@ function RutasExternoScreen({ onToast, go, route }) {
   // esta sesión (por ejemplo porque se acaba de confirmar, con la fusión
   // de fusionarPorTecnico) no se pisa. Esa reconstrucción no trae
   // coordenadas ni resumen de ruta (el backend no las tiene todavía), así
-  // que si se usa "Ver / Editar" sobre un día reaparecido así, mover/
+  // que si se usa "Editar plan" sobre un día reaparecido así, mover/
   // reordenar sigue funcionando pero sin recalcular km/hora — misma
   // limitación ya conocida de "Rutas confirmadas". Si el backend no
   // tiene nada, o falla, el día simplemente no muestra el punto verde —
@@ -1962,9 +2039,10 @@ function RutasExternoScreen({ onToast, go, route }) {
     // se hace del lado del cliente con fecha_programada (ver otsDelDia
     // más abajo) — por eso técnicosDisponibles no depende de la fecha
     // (el backend tampoco los filtra por día en este contrato) pero
-    // otsDelDia sí.
+    // otsDelDia sí. Se vuelven a pedir después de cada confirmación
+    // (recargaOts), porque ahí cambia qué OT siguen por asignar.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [recargaOts]);
 
   // Si se elimina la confirmación, las OT que vuelven a quedar elegibles
   // necesitan entrar a otsSel (pre-tildadas) — quedaron afuera al cargar
@@ -2015,12 +2093,19 @@ function RutasExternoScreen({ onToast, go, route }) {
     // en cada PATCH.
     marcarInicioPlanificacion();
     setFecha(fechaConfirmado);
-    setPropuesta({ porTecnico: deepClone(c.porTecnico), pendientes: [] });
+    // Cada ruta, por hora programada (lo mismo en el punto de partida, así
+    // ordenar al abrir no cuenta como un cambio).
+    const porHora = () => {
+      const porTecnico = deepClone(c.porTecnico);
+      Object.values(porTecnico).forEach(({ paradas }) => ordenarPorHora(paradas));
+      return porTecnico;
+    };
+    setPropuesta({ porTecnico: porHora(), pendientes: [] });
     // Punto de partida para esta sesión de edición: lo que ya estaba
     // confirmado. Si se mueve algo de acá en más y se vuelve a confirmar,
     // eso cuenta como modificación nueva (no se compara contra la corrida
     // original del optimizador, que ya no es lo relevante acá).
-    setPropuestaOriginal({ porTecnico: deepClone(c.porTecnico), pendientes: [] });
+    setPropuestaOriginal({ porTecnico: porHora(), pendientes: [] });
     setGeneradoEn(c.generadoEn || new Date().toISOString());
     setResumen(null); // no es una corrida nueva, no hay resumen que mostrar
     setError(null);
@@ -2030,23 +2115,41 @@ function RutasExternoScreen({ onToast, go, route }) {
     setEtapa("propuesta");
   };
 
-  // Entrada directa a edición desde "Rutas confirmadas" (botón "Editar"
-  // ahí, ver RegistroAsignaciones): esa pantalla navega acá con
-  // go("rutasExterno", { editarFecha }) en vez de duplicar la lógica de
-  // armar la propuesta editable — un solo lugar (onEditarConfirmado) sabe
-  // cómo reabrir un plan confirmado. Depende solo de editarFecha, así que
-  // no se vuelve a disparar si después se "vuelve a selección" sin salir
-  // de esta pantalla.
-  // Si la edición se abrió desde ahí, el "<" de la verificación vuelve a
-  // "Rutas confirmadas" (en ese mismo día) en vez de a la selección.
-  const [vieneDeRegistro, setVieneDeRegistro] = useState(false);
+  // Al editar un plan confirmado, Pendientes muestra también las OT de ese
+  // día que siguen sin asignar en GoodRoute (las que el optimizador no
+  // pudo ubicar o las que se quitaron en una edición anterior) — no solo
+  // las que se quitan ahora. Es un efecto y no parte de onEditarConfirmado
+  // porque, al entrar desde "Rutas confirmadas", la lista de OT todavía se
+  // está cargando: se suman en cuanto llega. Entran también a
+  // propuestaOriginal, así que estar en Pendientes no cuenta como cambio;
+  // sí cuenta asignarlas a un técnico (eso manda su PATCH al confirmar).
   useEffect(() => {
-    if (route?.params?.editarFecha) {
-      onEditarConfirmado(route.params.editarFecha);
-      setVieneDeRegistro(true);
-    }
+    if (!esReedicion || etapa !== "propuesta") return;
+    const sumarSinAsignar = p => {
+      if (!p) return p;
+      const presentes = new Set(p.pendientes.map(o => o.id));
+      Object.values(p.porTecnico).forEach(({ paradas }) => paradas.forEach(o => presentes.add(o.id)));
+      const faltan = otsDelDiaCrudo
+        .filter(o => o.fechaProgramada === fecha && !presentes.has(o.id) && !otsConfirmadasIds.has(o.id))
+        .map(o => ({ ...o, lat: null, lng: null }));
+      return faltan.length ? { ...p, pendientes: [...p.pendientes, ...faltan] } : p;
+    };
+    setPropuesta(sumarSinAsignar);
+    setPropuestaOriginal(sumarSinAsignar);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route?.params?.editarFecha]);
+  }, [esReedicion, etapa, fecha, otsDelDiaCrudo]);
+
+  // Pestaña del día debajo de la tira: "Por asignar" (la selección) o
+  // "Confirmadas" (las rutas ya confirmadas). Arranca en "Por asignar" y,
+  // al cambiar de día, se queda en la que estaba; la única excepción es
+  // "Confirmadas" en un día sin nada confirmado, que pasa a "Por asignar".
+  // Volver de una edición con "<" tampoco la cambia.
+  const [pestana, setPestana] = useState("porAsignar");
+  const confirmadasDelDia = estadoDelDia(fecha).confirmadas;
+  useEffect(() => {
+    if (pestana === "confirmadas" && confirmadasDelDia === 0) setPestana("porAsignar");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fecha, confirmadasDelDia]);
 
   // La asignación (HU-02) la resuelve el servicio real de optimización,
   // mandándole la selección vigente del panel. A diferencia del servicio
@@ -2261,7 +2364,7 @@ function RutasExternoScreen({ onToast, go, route }) {
   // pide el motivo de cualquier otra OT del diff que todavía no lo tenga.
   const pedirMotivoSiCorresponde = (propuestaFresca, otIdSugerido) => {
     if (!esReedicion) return;
-    const cambiados = calcularOtIdsCambiados(propuestaFresca, propuestaOriginal);
+    const cambiados = otsQuePidenMotivo(propuestaFresca, propuestaOriginal);
     const candidato = cambiados.has(otIdSugerido) ? otIdSugerido
       : Array.from(cambiados).find(id => !motivosPorOt[id]);
     if (candidato) setOtPidiendoMotivo(candidato);
@@ -2284,6 +2387,9 @@ function RutasExternoScreen({ onToast, go, route }) {
   const aplicarYRecalcular = async (fn, tecnicoIds, otId) => {
     const prev = propuesta;
     const next = fn(deepClone(prev));
+    // Editando un plan confirmado, cada ruta queda siempre por hora
+    // programada (ahí no hay flechas para reordenar a mano).
+    if (esReedicion) tecnicoIds.forEach(tid => { if (next.porTecnico[tid]) ordenarPorHora(next.porTecnico[tid].paradas); });
     setErroresTecnico(e => { const n = { ...e }; tecnicoIds.forEach(id => { delete n[id]; }); return n; });
 
     for (const tid of tecnicoIds) {
@@ -2478,18 +2584,61 @@ function RutasExternoScreen({ onToast, go, route }) {
     })();
   };
 
-  // Descarta la propuesta en pantalla y vuelve a la selección (o a "Rutas
-  // confirmadas", si la edición se abrió desde ahí) — también cierra la
-  // sesión de planificación (HU-30).
+  // "Descartar plan" (pestaña Confirmadas): `planADescartar` es lo que se va
+  // a desasignar mientras está abierta la confirmación. A cada OT se le
+  // quita el técnico en GoodRoute (mismo PATCH que al quitarla en una
+  // edición), con el motivo elegido, y vuelve a "Por asignar". Cada PATCH
+  // es independiente: si alguno falla, lo demás queda hecho y se avisa
+  // cuáles no.
+  const [planADescartar, setPlanADescartar] = useState(null);
+  const [descartando, setDescartando] = useState(false);
+  const onDescartarPlan = async (motivo) => {
+    const { otIds } = planADescartar;
+    setPlanADescartar(null);
+    setDescartando(true);
+    setError(null);
+    const u = CP_DATA.usuarios[0];
+    const revisadoPor = { usuario_id: u.id, nombre: u.nombre, rol: u.rol };
+    const resultados = await Promise.allSettled(otIds.map(otId =>
+      window.RUTAS_EXTERNO_API.patchTecnicoOt(otId, null, motivo, revisadoPor, "OT descartada", null, null)));
+    const desasignadas = new Set(otIds.filter((_, i) => resultados[i].status === "fulfilled"));
+    const fallidas = otIds
+      .map((otId, i) => ({ otId, r: resultados[i] }))
+      .filter(x => x.r.status === "rejected")
+      .map(x => `${x.otId} (${x.r.reason?.message || "error desconocido"})`);
+    // Saca del plan confirmado en memoria lo que se desasignó (si no queda
+    // nada, el día deja de figurar como confirmado).
+    setConfirmados(prev => {
+      const c = prev[fecha];
+      if (!c) return prev;
+      const porTecnico = {};
+      Object.entries(c.porTecnico).forEach(([tid, entry]) => {
+        const paradas = entry.paradas.filter(p => !desasignadas.has(p.id));
+        if (paradas.length) porTecnico[tid] = { ...entry, paradas };
+      });
+      const next = { ...prev };
+      if (Object.keys(porTecnico).length) next[fecha] = { ...c, porTecnico };
+      else delete next[fecha];
+      return next;
+    });
+    if (fallidas.length) {
+      setError(`${desasignadas.size} OT desasignadas, ${fallidas.length} no se pudieron desasignar: ${fallidas.join("; ")}`);
+      onToast?.(`Plan deshecho parcialmente — ${desasignadas.size} de ${otIds.length} OT`);
+    } else {
+      onToast?.(`Plan deshecho — ${desasignadas.size} OT vuelven a Por asignar`);
+    }
+    setRecargaOts(n => n + 1);
+    setDescartando(false);
+  };
+
+  // Descarta la propuesta en pantalla y vuelve a la selección, en la
+  // pestaña desde la que se entró — también cierra la sesión de
+  // planificación (HU-30).
   const onVolver = () => {
     setPropuesta(null); setPropuestaOriginal(null); setGeneradoEn(null); setResumen(null); setError(null);
     setEsReedicion(false); setMotivosPorOt({}); setOtPidiendoMotivo(null);
     descartarInicioPlanificacion();
     setEtapa("seleccion");
-    if (vieneDeRegistro) {
-      setVieneDeRegistro(false);
-      go("rutasExternoRegistro", { fecha });
-    }
   };
   // "<" de la verificación: pide confirmar antes de descartar. Al
   // reeditar un plan confirmado sin haber cambiado nada no hay nada que
@@ -2649,8 +2798,10 @@ function RutasExternoScreen({ onToast, go, route }) {
     const r = window.RUTAS_EXTERNO_OPTIMIZER.validarConfirmacion(propuesta.porTecnico);
     if (!r.ok) { setError(r.duplicado); return; }
 
+    // Se guardan todas las OT cambiadas, pero el motivo solo se exige a las
+    // que se reprogramaron (ver otsQuePidenMotivo).
     const otIdsCambiados = esReedicion ? calcularOtIdsCambiados(propuesta, propuestaOriginal) : new Set();
-    if (esReedicion && Array.from(otIdsCambiados).some(id => !motivosPorOt[id])) {
+    if (esReedicion && Array.from(otsQuePidenMotivo(propuesta, propuestaOriginal)).some(id => !motivosPorOt[id])) {
       setError("Falta el motivo de reprogramación de alguna OT editada.");
       return;
     }
@@ -2760,6 +2911,9 @@ function RutasExternoScreen({ onToast, go, route }) {
       setOtPidiendoMotivo(null);
       descartarInicioPlanificacion();
       setEtapa("seleccion");
+      // GoodRoute ya cambió el estado de las OT (las asignadas dejan de estar
+      // por asignar; las quitadas vuelven a estarlo): se vuelven a pedir.
+      setRecargaOts(n => n + 1);
     } catch (err) {
       setError(`No se pudo guardar la confirmación: ${err.message}`);
     } finally {
@@ -2783,14 +2937,11 @@ function RutasExternoScreen({ onToast, go, route }) {
     <div className="page fade-in">
       <div className="page-head">
         <div>
-          <div className="page-title">Planificar rutas</div>
+          {/* Editando un plan ya confirmado ("Editar plan") no se planifica: se editan rutas. */}
+          <div className="page-title">{etapa === "propuesta" && esReedicion ? "Editar rutas" : "Planificar rutas"}</div>
         </div>
         <div className="page-head-actions">
-          {etapa === "seleccion" ? (
-            <button className="btn btn-primary" style={{ padding: "10px 18px", fontSize: 14 }} onClick={() => go("rutasExternoRegistro", { fecha })}>
-              <Icon name="clock" />Rutas confirmadas
-            </button>
-          ) : propuesta && (
+          {etapa !== "seleccion" && propuesta && (
             <span className="cell-muted" style={{ fontSize: 13 }}>
               <b style={{ color: "var(--text)" }}>{totalTecnicosConRuta}</b> técnico{totalTecnicosConRuta === 1 ? "" : "s"} ·{" "}
               <b style={{ color: "var(--text)" }}>{totalOtsEnRutas}</b> OT
@@ -2801,26 +2952,32 @@ function RutasExternoScreen({ onToast, go, route }) {
 
       {etapa === "propuesta" && propuesta ? (
         <EncabezadoVerificacion fecha={fecha} resumen={resumen} pendientesCount={propuesta.pendientes.length} onVolver={onPedirVolver}
-          tituloVolver={vieneDeRegistro ? "Volver a Rutas confirmadas" : "Volver a la selección"}
           deshabilitado={confirmando || Object.values(recalculando).some(Boolean)} />
       ) : (
-        <div className="card card-pad" style={{ marginBottom: 16 }}>
-          <TiraDias fecha={fecha} onSeleccionar={onSeleccionarFecha} estadoDelDia={estadoDelDia}
-            fechaMin={fechaMin} fechaMax={fechaMax}
-            otsPorAsignarCount={otsDelDia.length} tecnicosCount={tecnicosDisponibles.length}
-            totalConfirmadas={estadoDelDia(fecha).confirmadas} onVerConfirmadas={() => onEditarConfirmado(fecha)} />
-        </div>
+        <>
+          {/* Sin resumen en la cabecera de la tira: lo que hay ese día ya lo
+              dicen las pestañas de abajo, con sus números. */}
+          <div className="card card-pad" style={{ marginBottom: 16 }}>
+            <TiraDias fecha={fecha} onSeleccionar={onSeleccionarFecha} estadoDelDia={estadoDelDia}
+              fechaMin={fechaMin} fechaMax={fechaMax} />
+          </div>
+          <PestanasDia pestana={pestana} onCambiar={setPestana}
+            porAsignar={otsDelDia.length} confirmadas={confirmadasDelDia} />
+        </>
       )}
 
       {confirmandoDescarte && (
         <ConfirmarDescartarModal fecha={fecha} esReedicion={esReedicion}
-          destino={vieneDeRegistro ? "a Rutas confirmadas" : "a la selección"}
           onCancelar={() => setConfirmandoDescarte(false)}
           onConfirmar={() => { onVolver(); setConfirmandoDescarte(false); }}
         />
       )}
 
-      {cargando ? (
+      {etapa === "seleccion" && pestana === "confirmadas" ? (
+        <RutasConfirmadasDia fecha={fecha} recarga={recargaOts} error={error}
+          puedeEditar={confirmadasDelDia > 0} onEditar={() => onEditarConfirmado(fecha)}
+          onDescartar={setPlanADescartar} />
+      ) : cargando ? (
         <div className="card" style={{ padding: "50px 20px", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--text-3)" }}>
           <span className="rx-ring rx-ring-18" aria-hidden="true" />Cargando datos del día…
         </div>
@@ -2855,8 +3012,13 @@ function RutasExternoScreen({ onToast, go, route }) {
         fecha={contextoOptimizando?.fecha ?? fecha}
         error={errorOptimizando} onReintentar={onOptimizar} onCerrar={() => setErrorOptimizando(null)} />
       {confirmando && <CargandoOverlay mensaje={esReedicion ? "Reprogramando…" : "Confirmando…"} />}
+      {planADescartar && (
+        <DescartarPlanModal fecha={fecha} totalOts={planADescartar.otIds.length} totalTecnicos={planADescartar.totalTecnicos}
+          enEjecucion={planADescartar.enEjecucion} onConfirmar={onDescartarPlan} onCancelar={() => setPlanADescartar(null)} />
+      )}
+      {descartando && <CargandoOverlay mensaje="Descartando plan…" />}
     </div>
   );
 }
 
-Object.assign(window, { RutasExternoScreen, RegistroAsignacionesScreen });
+Object.assign(window, { RutasExternoScreen });

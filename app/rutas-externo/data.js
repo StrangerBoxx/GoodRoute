@@ -219,6 +219,28 @@
       .sort((a, b) => a.ventanaInicio.localeCompare(b.ventanaInicio));
   }
 
+  // Todas las OT de GoodRoute, en cualquier estado, para el historial de
+  // OT del dashboard de Análisis. Mismo armado que las por asignar (hora
+  // de Chile, tipo en snake_case) más su estado y técnico actuales.
+  async function obtenerOrdenes() {
+    const ordenes = await fetchJSON(`${GOODROUTE_API_BASE_URL}/v1/ordenes`);
+    return ordenes.map(o => ({ ...construirOt(o), estado: o.estado, tecnicoId: o.tecnicoId || null }));
+  }
+
+  // Historia de la tabla de asignaciones de GoodRoute (HU-11): una fila por
+  // cada vez que se asignó o reprogramó una OT — quién, cuándo, si fue la
+  // propuesta del optimizador (id_propuesta) o una edición manual
+  // (id_propuesta null), si se modificó, motivo y km estimados. Viene
+  // completa (sin filtro por OT), así que se pide una vez y se reutiliza.
+  let asignacionesEnCurso = null;
+  function obtenerAsignaciones({ recargar = false } = {}) {
+    if (!asignacionesEnCurso || recargar) {
+      asignacionesEnCurso = fetchJSON(`${GOODROUTE_API_BASE_URL}/asignaciones`)
+        .catch(err => { asignacionesEnCurso = null; throw err; });
+    }
+    return asignacionesEnCurso;
+  }
+
   // Ejecuta la optimización real (POST /api/optimizador/ejecutar). Desde
   // la v3.0.0 del optimizador ya NO existe aplicar_cambios (responde 422
   // si se manda): solo propone rutas, y la asignación la persiste
@@ -261,10 +283,9 @@
   // reconstruye acá cruzando /api/ordenes (filtradas por fecha_programada
   // y con tecnico_id asignado) con /api/tecnicos de ESE mismo backend.
   // Nota: esas OT no traen latitud/longitud ni la base del técnico, así
-  // que "Ver en mapa" en el registro queda sin datos para trazar hasta
-  // que el equipo de BD agregue esos campos o un endpoint propio — se
-  // avisa solo, ya maneja el caso de "no hay puntos" (ver verEnMapa en
-  // RutasExterno.jsx), no se cae.
+  // que "Ver en mapa" en el registro ubica cada parada por su dirección
+  // (geocodificarDireccion) y traza sin la base (ver verEnMapa en
+  // RutasExterno.jsx).
   // Agrupa TODAS las OT con técnico asignado por fecha_programada y
   // luego por técnico — un solo fetch sirve tanto para consultar un día
   // puntual (obtenerRutasRegistradas) como para descubrir TODAS las
@@ -300,7 +321,13 @@
           ot_id: o.id,
           tipo: tipoDesdeGoodRoute(o.tipo),
           direccion: o.comuna ? `${o.direccionInstalacion}, ${o.comuna}` : o.direccionInstalacion,
+          // Calle y comuna por separado, para geocodificar en "Ver en mapa".
+          calle: o.direccionInstalacion,
+          comuna: o.comuna || null,
           hora_programada: local.hora,
+          // Estado en GoodRoute: "Deshacer plan" no toca las OT que ya se
+          // están ejecutando o están terminadas.
+          estado: o.estado,
         });
       });
     const resultado = {};
@@ -354,6 +381,18 @@
   async function obtenerGeometriaRuta(puntos) {
     const coordenadas = puntos.map(p => `${p.lng},${p.lat}`).join(";");
     return fetchJSON(`${API_BASE_URL}/ruteo/geometria?coordenadas=${encodeURIComponent(coordenadas)}`);
+  }
+
+  // Coordenadas de una dirección (GET /api/geocoding del optimizador, que
+  // usa su propio caché). GoodRoute no guarda lat/lng de las OT, así que
+  // "Ver en mapa" de "Rutas confirmadas" las resuelve con esto. Devuelve
+  // { lat, lng } o null si no la pudo ubicar.
+  async function geocodificarDireccion(direccion, comuna) {
+    const q = new URLSearchParams({ direccion });
+    if (comuna) q.set("comuna", comuna);
+    const r = await fetchJSON(`${API_BASE_URL}/geocoding?${q}`);
+    const res = r && r.resultado;
+    return res && res.lat != null && res.lon != null ? { lat: res.lat, lng: res.lon } : null;
   }
 
   // Catálogo de parámetros configurables (HU-16): de qué consta el panel
@@ -499,8 +538,8 @@
 
   window.RUTAS_EXTERNO_API = {
     API_BASE_URL, hoyISO, sumarDiasISO, fetchJSON,
-    obtenerTecnicos, obtenerOtsPorAsignar,
-    ejecutarOptimizacion, obtenerRutasRegistradas, obtenerAsignacionesConfirmadasPorFecha, obtenerGeometriaRuta,
+    obtenerTecnicos, obtenerOtsPorAsignar, obtenerOrdenes, obtenerAsignaciones,
+    ejecutarOptimizacion, obtenerRutasRegistradas, obtenerAsignacionesConfirmadasPorFecha, obtenerGeometriaRuta, geocodificarDireccion,
     obtenerKpisRango,
     obtenerCatalogoParametros, obtenerConfiguracion, guardarConfiguracion, restaurarConfiguracion,
     confirmarAsignaciones, patchTecnicoOt,

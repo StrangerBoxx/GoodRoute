@@ -67,7 +67,7 @@ const INDICADORES = [
     nombre: "OT asignadas",
     definicion: "Cantidad de OT que quedaron asignadas a un técnico (sin contar las reprogramaciones).",
     formula: "filas de asignación con técnico aceptado y sin motivo de reprogramación",
-    fuente: "GoodRoute (HU-24): tabla asignacion.",
+    fuente: "Registro de asignaciones de GoodRoute.",
     unidad: "OT", formato: "ot", direccion: "contexto", granularidad: "tecnico",
     grupo: "operacion", grafico: "barras_verticales",
   },
@@ -77,7 +77,7 @@ const INDICADORES = [
     nombre: "OT realizadas con éxito",
     definicion: "Cantidad de OT ejecutadas y finalizadas correctamente (una OT parcial no cuenta).",
     formula: "conteo de OT en estado finalizada",
-    fuente: "GoodRoute (HU-24): OT del sistema externo.",
+    fuente: "Registro de OT de GoodRoute.",
     unidad: "OT", formato: "ot", direccion: "mas", granularidad: "tecnico",
     grupo: "operacion", grafico: "barras_verticales",
   },
@@ -87,7 +87,7 @@ const INDICADORES = [
     nombre: "OT pendientes",
     definicion: "OT del día que, al terminar el día en hora de Chile, todavía no estaban finalizadas.",
     formula: "conteo de OT del día no finalizadas al cierre del día",
-    fuente: "GoodRoute (HU-24): OT del sistema externo. No se calcula por técnico.",
+    fuente: "Registro de OT de GoodRoute. No se calcula por técnico.",
     unidad: "OT", formato: "ot", direccion: "menos", granularidad: "global",
     grupo: "operacion", grafico: "barras_verticales",
   },
@@ -97,7 +97,7 @@ const INDICADORES = [
     nombre: "OT reprogramadas",
     definicion: "Cantidad de OT que se reprogramaron después de haber sido asignadas.",
     formula: "filas de asignación con motivo de reprogramación",
-    fuente: "GoodRoute (HU-24): tabla asignacion.",
+    fuente: "Registro de asignaciones de GoodRoute.",
     unidad: "OT", formato: "ot", direccion: "menos", granularidad: "tecnico",
     grupo: "operacion", grafico: "barras_verticales",
   },
@@ -107,7 +107,7 @@ const INDICADORES = [
     nombre: "Cumplimiento de ventana horaria",
     definicion: "Porcentaje de OT en que el técnico llegó dentro de la ventana comprometida (hasta 30 min antes y 15 min después de la hora programada).",
     formula: "OT con inicio de visita dentro de la ventana / OT con inicio de visita",
-    fuente: "GoodRoute: inicio de visita y hora programada de las OT.",
+    fuente: "Registro de OT de GoodRoute: inicio de visita y hora programada.",
     unidad: "%", formato: "pct", direccion: "mas", granularidad: "tecnico",
     grupo: "operacion", grafico: "linea_banda_min_max",
   },
@@ -119,7 +119,7 @@ const INDICADORES = [
     nombre: "Tiempo de traslado",
     definicion: "Tiempo promedio de traslado entre una OT y la siguiente del mismo técnico.",
     formula: "promedio(documento de inicio de la OT siguiente − comprobante de la OT anterior)",
-    fuente: "GoodRoute (HU-24): documento de inicio y comprobantes de las OT.",
+    fuente: "Registro de OT de GoodRoute: inicio y comprobante de cada visita.",
     unidad: "min", formato: "min", direccion: "menos", granularidad: "tecnico",
     grupo: "recurso", grafico: "linea_banda_min_max",
   },
@@ -129,7 +129,7 @@ const INDICADORES = [
     nombre: "Tiempo promedio de servicio",
     definicion: "Cuánto demora realmente un técnico desde que inicia hasta que termina una OT.",
     formula: "promedio(comprobante de la OT − documento de inicio de la OT)",
-    fuente: "GoodRoute (HU-24): documento de inicio y comprobantes de las OT.",
+    fuente: "Registro de OT de GoodRoute: inicio y comprobante de cada visita.",
     unidad: "min", formato: "min", direccion: "menos", granularidad: "tecnico",
     grupo: "recurso", grafico: "linea_banda_min_max",
   },
@@ -139,7 +139,7 @@ const INDICADORES = [
     nombre: "Utilización de jornada",
     definicion: "Porcentaje de la jornada (08:00 a 19:00) que los técnicos con OT ese día pasaron trabajando.",
     formula: "minutos de trabajo (inicio de visita → comprobante) / (660 min × técnicos con OT)",
-    fuente: "GoodRoute: inicio de visita y comprobantes de las OT.",
+    fuente: "Registro de OT de GoodRoute: inicio y comprobante de cada visita.",
     unidad: "%", formato: "pct", direccion: "mas", granularidad: "tecnico",
     grupo: "recurso", grafico: "linea_banda_min_max",
   },
@@ -151,7 +151,7 @@ const INDICADORES = [
     nombre: "Tasa de aceptación de rutas",
     definicion: "Porcentaje de las propuestas del optimizador que la planificadora aceptó sin modificar. Las ediciones manuales no cuentan.",
     formula: "propuestas del optimizador sin modificar / propuestas del optimizador",
-    fuente: "GoodRoute (HU-24): tabla asignacion.",
+    fuente: "Registro de asignaciones de GoodRoute.",
     unidad: "%", formato: "pct", direccion: "mas", granularidad: "tecnico",
     grupo: "optimizacion", grafico: "linea",
   },
@@ -161,7 +161,7 @@ const INDICADORES = [
     nombre: "Tiempo de planificación",
     definicion: "Tiempo promedio que Operaciones demora en planificar una jornada.",
     formula: "promedio(fecha de asignación − inicio de la planificación)",
-    fuente: "GoodRoute (HU-24): tabla asignacion. No se calcula por técnico.",
+    fuente: "Registro de asignaciones de GoodRoute. No se calcula por técnico.",
     unidad: "min", formato: "min", direccion: "menos", granularidad: "global",
     grupo: "optimizacion",
   },
@@ -945,6 +945,14 @@ const EXPLICACION_POR_TIPO = {
   linea_banda_min_max: "promedio con mínimo y máximo entre técnicos",
   barras_verticales: "total diario",
 };
+// Nombre del tipo de gráfico: subtítulo en pantalla y título de la sección
+// del gráfico en el PDF.
+const NOMBRE_GRAFICO_POR_TIPO = {
+  area: "Gráfico de área",
+  linea: "Gráfico de línea",
+  linea_banda_min_max: "Gráfico de línea con banda",
+  barras_verticales: "Histograma",
+};
 
 /* ==========================================================================
    9. TORRE DE CONTROL — botonera de categorías, gráfico principal, tabla
@@ -1038,7 +1046,9 @@ function GraficoPrincipal({ ind, d, cargando, graficoRef, periodo }) {
             <div className="block-title">{ind.nombre}</div>
             <InfoIndicador ind={ind} />
           </div>
-          <p style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 2 }}>{explicacion}</p>
+          <p style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 2 }}>
+            {(NOMBRE_GRAFICO_POR_TIPO[ind.grafico] || NOMBRE_GRAFICO_POR_TIPO.area) + " · " + explicacion}
+          </p>
           {nota && <p style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 2 }}>{nota}</p>}
         </div>
         <div style={{ marginLeft: "auto", textAlign: "right" }}>
@@ -1090,7 +1100,6 @@ function TablaTecnicos({ ind, d, cargando, tablaRef, periodo }) {
     <>
       <div className="sec-head">
         <div className="sec-title">Detalle por técnico</div>
-        <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>{ind.sigla} · {esAcumulable(ind) ? "total" : "promedio"} · {textoPeriodo(periodo)}</span>
       </div>
       <div ref={tablaRef} className="card">
         {cargando || d.desgloseCargando ? <Cargando alto={200} texto={d.motivoDesglose || d.motivoVacio} /> : d.vacio ? <SinDatos motivo={d.motivoVacio} alto={200} /> : ind.granularidad === "global" ? (
@@ -1127,11 +1136,251 @@ function TablaTecnicos({ ind, d, cargando, tablaRef, periodo }) {
 }
 
 /* ==========================================================================
+   9b. DETALLE POR OT — las OT del indicador elegido + su historia
+   --------------------------------------------------------------------------
+   Las OT de GoodRoute (GET /api/v1/ordenes) que cuenta el indicador elegido
+   arriba (ver FILTRO_OT_POR_KPI), programadas dentro del período y con el
+   mismo filtro de técnico y zona — sin filtros propios: es una vista del
+   KPI, no un buscador de OT. Al tocar una
+   OT se despliega su historia de asignaciones (GET /api/asignaciones,
+   HU-11): cada vez que se asignó o reprogramó, quién, cuándo, si fue la
+   propuesta del optimizador o una edición manual, y el motivo.
+   ========================================================================== */
+const ESTADO_OT = {
+  porAsignar: { texto: "Por asignar", cls: "b-gray" },
+  asignacionPorConfirmar: { texto: "Por confirmar", cls: "b-amber" },
+  asignada: { texto: "Asignada", cls: "b-blue" },
+  enTerreno: { texto: "En terreno", cls: "b-violet" },
+  parcial: { texto: "Parcial", cls: "b-orange" },
+  finalizada: { texto: "Finalizada", cls: "b-green" },
+};
+const HISTORIAL_POR_PAGINA = 25;
+
+// Qué OT muestra el historial según el indicador elegido arriba: las que
+// ese KPI cuenta (o, en los promedios de tiempo y porcentajes de
+// ejecución, las que entran en su cálculo). `ctx` trae, de la historia de
+// asignaciones, qué OT se reprogramaron y cuáles propuso el optimizador.
+const OT_EJECUTADAS = new Set(["enTerreno", "parcial", "finalizada"]);
+const FILTRO_OT_POR_KPI = {
+  OTA: { texto: "OT asignadas", fn: (o) => !!o.tecnicoId },
+  OTX: { texto: "OT finalizadas", fn: (o) => o.estado === "finalizada" },
+  OTP: { texto: "OT no finalizadas", fn: (o) => o.estado !== "finalizada" },
+  OTR: { texto: "OT reprogramadas", fn: (o, ctx) => ctx.reprogramadas.has(o.id) },
+  CVH: { texto: "OT ejecutadas", fn: (o) => OT_EJECUTADAS.has(o.estado) },
+  TTR: { texto: "OT ejecutadas", fn: (o) => OT_EJECUTADAS.has(o.estado) },
+  TPS: { texto: "OT ejecutadas", fn: (o) => OT_EJECUTADAS.has(o.estado) },
+  UJO: { texto: "OT ejecutadas", fn: (o) => OT_EJECUTADAS.has(o.estado) },
+  TAR: { texto: "OT propuestas por el optimizador", fn: (o, ctx) => ctx.propuestas.has(o.id) },
+  TPL: { texto: "OT asignadas", fn: (o) => !!o.tecnicoId },
+};
+const fechaHoraChile = (instante) =>
+  new Date(instante).toLocaleString("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+
+function HistoriaAsignaciones({ otId }) {
+  const [estado, setEstado] = useState("cargando");
+  const [filas, setFilas] = useState([]);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    let activo = true;
+    window.RUTAS_EXTERNO_API.obtenerAsignaciones()
+      .then((todas) => {
+        if (!activo) return;
+        setFilas(todas.filter((a) => a.id_orden_trabajo === otId)
+          .sort((a, b) => String(a.fecha_asignacion).localeCompare(String(b.fecha_asignacion))));
+        setEstado("ok");
+      })
+      .catch((err) => { if (activo) { setError(err.message); setEstado("error"); } });
+    return () => { activo = false; };
+  }, [otId]);
+
+  if (estado === "cargando") return <div className="cell-muted" style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 7 }}><span className="rx-ring rx-ring-14" aria-hidden="true" />Cargando historia…</div>;
+  if (estado === "error") return <div style={{ fontSize: 12.5, color: "var(--red-fg)" }}>No se pudo cargar la historia: {error}</div>;
+  if (!filas.length) return <div className="cell-muted" style={{ fontSize: 12.5 }}>Esta OT todavía no tiene asignaciones registradas.</div>;
+  return (
+    <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+      {filas.map((a, i) => {
+        const origen = !a.id_propuesta ? "Edición manual"
+          : a.propuesta_modificada ? "Propuesta del optimizador, modificada" : "Propuesta del optimizador";
+        return (
+          <li key={i} style={{ display: "flex", gap: 10, fontSize: 12.5 }}>
+            <span style={{ flex: "none", width: 8, height: 8, borderRadius: "50%", marginTop: 5, background: i === filas.length - 1 ? "var(--accent)" : "var(--border-3)" }} />
+            <div style={{ minWidth: 0 }}>
+              <div><b style={{ color: "var(--text)" }}>{a.fecha_asignacion ? fechaHoraChile(a.fecha_asignacion) : "—"}</b>{a.usuario_dispatcher ? " · " + a.usuario_dispatcher : ""}</div>
+              <div className="cell-muted">
+                {origen}{a.tipo_modificacion ? " · " + a.tipo_modificacion : ""}{a.motivo_reprogramacion ? " · Motivo: " + a.motivo_reprogramacion : ""}
+                {a.kilometraje_estimado != null ? " · " + nf(a.kilometraje_estimado, 1) + " km estimados" : ""}
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+// Botón "Exportar <sigla>" a la derecha de las categorías: el nombre sigue
+// al indicador elegido, que es lo que se exporta (su serie, su detalle por
+// técnico y por OT). Abre un menú con Excel y PDF; se cierra al elegir, con
+// Escape o con un clic afuera.
+function MenuExportar({ sigla, deshabilitado, generandoExcel, generandoPdf, error, onExcel, onPdf }) {
+  const [abierto, setAbierto] = useState(false);
+  const caja = useRef(null);
+  useEffect(() => {
+    if (!abierto) return;
+    const cerrar = (e) => { if (caja.current && !caja.current.contains(e.target)) setAbierto(false); };
+    const esc = (e) => { if (e.key === "Escape") setAbierto(false); };
+    window.addEventListener("mousedown", cerrar);
+    window.addEventListener("keydown", esc);
+    return () => { window.removeEventListener("mousedown", cerrar); window.removeEventListener("keydown", esc); };
+  }, [abierto]);
+  const generando = generandoExcel || generandoPdf;
+  const elegir = (fn) => { setAbierto(false); fn(); };
+  return (
+    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+      {error && <span style={{ fontSize: 12, color: "var(--red-fg)" }}>{error}</span>}
+      <div ref={caja} style={{ position: "relative" }}>
+        <button type="button" className="btn" aria-haspopup="menu" aria-expanded={abierto}
+          disabled={deshabilitado || generando} onClick={() => setAbierto((v) => !v)}>
+          <span className={generando ? "icon-spin" : ""}><Icon name={generando ? "refresh" : "download"} /></span>
+          {/* La sigla con el mismo recuadro que en las tarjetas (.kpi-sigla). */}
+          {generando ? "Generando…" : <>Exportar <span className="kpi-sigla">{sigla}</span></>}
+        </button>
+        {abierto && (
+          <div className="dropdown" role="menu" style={{ minWidth: 180 }}>
+            <button type="button" role="menuitem" className="dropdown-item" onClick={() => elegir(onExcel)}>
+              <Icon name="download" />Excel (.xlsx)
+            </button>
+            <button type="button" role="menuitem" className="dropdown-item" onClick={() => elegir(onPdf)}>
+              <Icon name="download" />PDF
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// `filasRef` recibe la lista completa ya filtrada (no solo la página
+// visible), lista para la hoja "Detalle por OT" del Excel.
+function HistorialOT({ ind, periodo, filtros, tecnicos, recarga, filasRef }) {
+  const [estado, setEstado] = useState("cargando");
+  const [ordenes, setOrdenes] = useState([]);
+  const [asignaciones, setAsignaciones] = useState([]);
+  const [error, setError] = useState(null);
+  const [visibles, setVisibles] = useState(HISTORIAL_POR_PAGINA);
+  const [abierta, setAbierta] = useState(null);
+
+  useEffect(() => {
+    let activo = true;
+    setEstado("cargando");
+    // "Actualizar" también trae la historia de asignaciones de nuevo (la
+    // usan OTR y TAR para saber qué OT mostrar).
+    Promise.all([
+      window.RUTAS_EXTERNO_API.obtenerOrdenes(),
+      window.RUTAS_EXTERNO_API.obtenerAsignaciones({ recargar: true }).catch(() => []),
+    ])
+      .then(([data, asig]) => { if (activo) { setOrdenes(data); setAsignaciones(asig); setEstado("ok"); } })
+      .catch((err) => { if (activo) { setError(err.message); setEstado("error"); } });
+    return () => { activo = false; };
+  }, [recarga]);
+
+  const ctxKpi = useMemo(() => ({
+    reprogramadas: new Set(asignaciones.filter((a) => a.motivo_reprogramacion).map((a) => a.id_orden_trabajo)),
+    propuestas: new Set(asignaciones.filter((a) => a.id_propuesta).map((a) => a.id_orden_trabajo)),
+  }), [asignaciones]);
+  const filtroKpi = FILTRO_OT_POR_KPI[ind.sigla] || null;
+
+  const tecnicoPorId = useMemo(() => Object.fromEntries(tecnicos.map((t) => [t.id, t])), [tecnicos]);
+  const filtradas = useMemo(() => {
+    if (!periodo) return [];
+    return ordenes
+      .filter((o) => o.fechaProgramada && o.fechaProgramada >= periodo.desde && o.fechaProgramada <= periodo.hasta)
+      .filter((o) => !filtroKpi || filtroKpi.fn(o, ctxKpi))
+      .filter((o) => filtros.tecnico === "todos" || o.tecnicoId === filtros.tecnico)
+      .filter((o) => filtros.zona === "todas" || (tecnicoPorId[o.tecnicoId] && tecnicoPorId[o.tecnicoId].zona === filtros.zona))
+      .sort((a, b) => (b.fechaProgramada + (b.horaProgramada || "")).localeCompare(a.fechaProgramada + (a.horaProgramada || "")));
+  }, [ordenes, periodo && periodo.desde, periodo && periodo.hasta, filtros.tecnico, filtros.zona, tecnicoPorId, filtroKpi, ctxKpi]);
+
+  useEffect(() => {
+    if (!filasRef) return;
+    filasRef.current = filtradas.map((o) => {
+      const tec = tecnicoPorId[o.tecnicoId];
+      return {
+        id: o.id, fecha: o.fechaProgramada.slice(8, 10) + "/" + o.fechaProgramada.slice(5, 7) + "/" + o.fechaProgramada.slice(0, 4),
+        hora: o.horaProgramada || "", tipo: o.cliente, direccion: o.direccion || "", comuna: o.comuna || "",
+        tecnico: tec ? tec.nombre : o.tecnicoId ? "" : "Sin técnico",
+        estado: (ESTADO_OT[o.estado] || { texto: o.estado }).texto,
+      };
+    });
+  }, [filtradas, tecnicoPorId]);
+
+  // Al cambiar de indicador o de filtro se vuelve a la primera página.
+  useEffect(() => { setVisibles(HISTORIAL_POR_PAGINA); }, [periodo && periodo.desde, periodo && periodo.hasta, filtros.tecnico, filtros.zona, filtroKpi]);
+
+  const fechaCorta = (o) => o.fechaProgramada.slice(8, 10) + "/" + o.fechaProgramada.slice(5, 7) + (o.horaProgramada ? " " + o.horaProgramada : "");
+
+  return (
+    <>
+      <div className="sec-head">
+        <div className="sec-title">Detalle por OT</div>
+      </div>
+      <div className="card" style={{ overflowX: "auto" }}>
+        {estado === "cargando" ? <Cargando alto={200} texto="Cargando OT…" />
+          : estado === "error" ? <SinDatos alto={160} motivo={"No se pudieron cargar las OT: " + error} />
+          : filtradas.length === 0 ? <SinDatos alto={160} motivo="No hay OT con estos filtros en el período elegido." />
+          : (
+            <table className="tbl">
+              <thead>
+                <tr><th>OT</th><th>Programada</th><th>Tipo</th><th>Comuna</th><th>Técnico</th><th>Estado</th><th style={{ width: 28 }} /></tr>
+              </thead>
+              <tbody>
+                {filtradas.slice(0, visibles).map((o) => {
+                  const est = ESTADO_OT[o.estado] || { texto: o.estado, cls: "b-gray" };
+                  const tec = tecnicoPorId[o.tecnicoId];
+                  const estaAbierta = abierta === o.id;
+                  return (
+                    <React.Fragment key={o.id}>
+                      <tr className="clickable" onClick={() => setAbierta(estaAbierta ? null : o.id)} aria-expanded={estaAbierta}>
+                        <td className="cell-strong" style={{ whiteSpace: "nowrap" }}>{o.id}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{fechaCorta(o)}</td>
+                        <td className="cell-muted">{o.cliente}</td>
+                        <td className="cell-muted">{o.comuna || "—"}</td>
+                        <td>{tec ? tec.nombre : o.tecnicoId ? "—" : <span className="cell-muted">Sin técnico</span>}</td>
+                        <td><span className={"badge " + est.cls}>{est.texto}</span></td>
+                        <td><Icon name="chevR" style={{ width: 12, height: 12, color: "var(--text-3)", transform: estaAbierta ? "rotate(-90deg)" : "rotate(90deg)" }} /></td>
+                      </tr>
+                      {estaAbierta && (
+                        <tr>
+                          <td colSpan={7} style={{ background: "var(--surface-2)", padding: "12px 18px" }}>
+                            <div className="cell-muted" style={{ fontSize: 12, marginBottom: 8 }}>{o.direccion}</div>
+                            <HistoriaAsignaciones otId={o.id} />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+      </div>
+      {estado === "ok" && filtradas.length > visibles && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 10 }}>
+          <button type="button" className="btn btn-sm" onClick={() => setVisibles((n) => n + HISTORIAL_POR_PAGINA)}>
+            Mostrar {Math.min(HISTORIAL_POR_PAGINA, filtradas.length - visibles)} más (de {filtradas.length - visibles} restantes)
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ==========================================================================
    10. EXPORTACIÓN A PDF
    --------------------------------------------------------------------------
-   Exporta exactamente lo que el usuario tiene en pantalla en ese momento
-   (categoría activa, indicador elegido, orden de tabla, período y filtros),
-   nunca el dashboard completo. Genera el documento con pdfmake (texto y
+   Exporta el indicador elegido ("Exportar <sigla>") con el período, los
+   filtros y el orden de tabla que hay en pantalla — no la categoría ni el
+   dashboard completo. Genera el documento con pdfmake (texto y
    tablas vectoriales reales, no una captura de pantalla) — el único
    contenido rasterizado es el gráfico grande, porque pdfmake no sabe dibujar
    el SVG de Recharts; se lo convierte a PNG a 3x para que no se vea pixelado.
@@ -1145,10 +1394,6 @@ function TablaTecnicos({ ind, d, cargando, tablaRef, periodo }) {
 function fechaCompleta(iso) {
   const [y, m, d] = iso.split("-");
   return d + "/" + m + "/" + y;
-}
-
-function textoCategoriaActiva(grupoActivo, grupo) {
-  return grupoActivo === TODOS_ID ? "Todos los indicadores" : grupo.nombre;
 }
 
 function textoFiltrosActivos(filtros) {
@@ -1237,136 +1482,134 @@ function leerFilasTabla(tablaRef) {
   });
 }
 
-function celdaTarjetaPdf(ind, d, paleta) {
-  const grupo = GRUPOS.find((g) => g.id === ind.grupo);
-  return {
-    unbreakable: true,
-    margin: [0, 0, 10, 12],
-    stack: [
-      { canvas: [{ type: "rect", x: 0, y: 0, w: 18, h: 3, color: grupo.color }], margin: [0, 0, 0, 4] },
-      { text: ind.nombre, fontSize: 9.5, bold: true, margin: [0, 0, 0, 2] },
-      { text: d.vacio ? "—" : formatearCorto(d.valor, ind.formato) + (!d.vacio && ind.formato === "clpOT" ? " /OT" : ""), fontSize: 15, bold: true },
-      { text: d.vacio ? "Sin datos con los filtros actuales" : direccionTexto(ind), fontSize: 8, color: paleta.text3, margin: [0, 1, 0, 0] },
-    ],
-  };
-}
-
-function tablaTarjetasPdf(indicadores, datos, paleta) {
-  const columnas = 3;
-  const filas = [];
-  for (let i = 0; i < indicadores.length; i += columnas) {
-    const fila = indicadores.slice(i, i + columnas).map((ind) => celdaTarjetaPdf(ind, datos[ind.id], paleta));
-    while (fila.length < columnas) fila.push({ text: "" });
-    filas.push(fila);
-  }
-  return {
-    table: { widths: Array(columnas).fill("*"), body: filas, dontBreakRows: true },
-    layout: "noBorders",
-    margin: [0, 0, 0, 6],
-  };
-}
-
 // Arma el árbol de contenido que pdfmake necesita — sin tocar ningún dato
-// que no sea el que ya está en pantalla (delGrupo/ind/datos/rango/filtros
-// vienen tal cual del estado de DashboardAnalisisScreen).
-function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, filtros, fechaInicioISO, fechaFinISO, imagenGrafico, filasTabla }) {
+// que no sea el que ya está en pantalla. Es el informe de UN indicador, el
+// elegido ("Exportar <sigla>"): su valor y definición, su evolución, el
+// detalle por técnico y el detalle por OT (la lista completa, no solo la
+// página visible).
+function construirDocDefinicionPdf({ grupo, ind, datos, filtros, fechaInicioISO, fechaFinISO, imagenGrafico, filasTabla, filasOt }) {
   const paleta = resolverPaletaPdf();
   const d = datos[ind.id];
   const fechaGeneracion = new Date();
   const fechaGeneracionTexto =
     fechaGeneracion.toLocaleDateString("es-CL") + " a las " +
     fechaGeneracion.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
-  const textoCategoria = textoCategoriaActiva(grupoActivo, grupo);
   const explicacion = EXPLICACION_POR_TIPO[ind.grafico] || EXPLICACION_POR_TIPO.area;
+  const colorCategoria = (GRUPOS.find((g) => g.id === ind.grupo) || grupo || { color: paleta.accent }).color;
+
+  const tituloSeccion = (texto, margenSup) => ({ text: texto, fontSize: 13, bold: true, margin: [0, margenSup, 0, 8] });
+  const sinDatos = (texto) => ({ text: texto, italics: true, color: paleta.text3, fontSize: 9.5, margin: [0, 0, 0, 12] });
+  const lineasTabla = {
+    hLineWidth: (i) => (i === 0 ? 0 : 0.5),
+    vLineWidth: () => 0,
+    hLineColor: () => paleta.border,
+    paddingLeft: () => 8, paddingRight: () => 8, paddingTop: () => 6, paddingBottom: () => 6,
+  };
+  const encabezado = (texto, derecha) => ({ text: texto, fontSize: 8.5, bold: true, color: paleta.text3, alignment: derecha ? "right" : "left" });
 
   const contenido = [
-    { text: "CONTROL POSITION", fontSize: 13, bold: true, color: paleta.accent },
-    { text: "Análisis de indicadores de asignación", fontSize: 17, bold: true, margin: [0, 3, 0, 2] },
+    { text: "CONTROL POSITION · ANÁLISIS DE INDICADORES", fontSize: 9, bold: true, color: paleta.accent },
+    { text: ind.sigla + " · " + ind.nombre, fontSize: 18, bold: true, margin: [0, 4, 0, 2] },
     { text: "Generado el " + fechaGeneracionTexto, fontSize: 9, color: paleta.text3, margin: [0, 0, 0, 10] },
     {
       text: [
-        { text: "Categoría: ", bold: true }, textoCategoria + "   ·   ",
         { text: "Período: ", bold: true }, fechaCompleta(fechaInicioISO) + " al " + fechaCompleta(fechaFinISO) + "   ·   ",
         { text: "Filtros: ", bold: true }, textoFiltrosActivos(filtros),
       ],
-      fontSize: 9.5, color: paleta.text2, margin: [0, 0, 0, 12],
+      fontSize: 9.5, color: paleta.text2, margin: [0, 0, 0, 14],
     },
   ];
 
-  // Cada título va pegado (unbreakable) a lo primero de su sección, para que
-  // nunca quede un encabezado solo al final de una página con el contenido
-  // recién en la siguiente.
-  const tituloSeccion = (texto, margenSup) => ({ text: texto, fontSize: 13, bold: true, margin: [0, margenSup, 0, 8] });
-
+  // Resumen: valor del período al lado de qué mide y cómo se calcula.
   contenido.push({
     unbreakable: true,
-    stack: [tituloSeccion("Indicadores — " + textoCategoria, 0), tablaTarjetasPdf(delGrupo, datos, paleta)],
+    columns: [
+      {
+        width: 150,
+        stack: [
+          { canvas: [{ type: "rect", x: 0, y: 0, w: 18, h: 3, color: colorCategoria }], margin: [0, 0, 0, 6] },
+          { text: d.vacio ? "—" : formatear(d.valor, ind.formato), fontSize: 22, bold: true },
+          { text: (esAcumulable(ind) ? "Total" : "Promedio") + " del período", fontSize: 8.5, color: paleta.text3, margin: [0, 2, 0, 0] },
+          { text: d.vacio ? "Sin datos con los filtros actuales" : direccionTexto(ind), fontSize: 8.5, color: paleta.text3 },
+        ],
+      },
+      {
+        width: "*",
+        stack: [
+          { text: ind.definicion, fontSize: 9.5, margin: [0, 0, 0, 5] },
+          { text: "Fórmula", fontSize: 8, bold: true, color: paleta.text3 },
+          { text: ind.formula, fontSize: 9.5, italics: true, margin: [0, 1, 0, 5] },
+          { text: "Fuente del dato", fontSize: 8, bold: true, color: paleta.text3 },
+          { text: ind.fuente, fontSize: 9.5, margin: [0, 1, 0, 0] },
+        ],
+      },
+    ],
+    columnGap: 18,
+    margin: [0, 0, 0, 16],
   });
 
   const cuerpoEvolucion = d.vacio
-    ? { text: "Sin datos para este indicador con los filtros actuales. " + (d.motivoVacio || ""), italics: true, color: paleta.text3, fontSize: 9.5, margin: [0, 0, 0, 12] }
+    ? sinDatos("Sin datos para este indicador con los filtros actuales. " + (d.motivoVacio || ""))
     : imagenGrafico
       ? {
           stack: [
-            { text: explicacion, fontSize: 8.5, italics: true, color: paleta.text3, margin: [0, 0, 0, 3] },
-            { text: (esAcumulable(ind) ? "Total del período: " : "Promedio del período: ") + formatear(d.valor, ind.formato), fontSize: 9.5, color: paleta.text2, margin: [0, 0, 0, 6] },
+            { text: explicacion, fontSize: 8.5, italics: true, color: paleta.text3, margin: [0, 0, 0, 6] },
             { image: imagenGrafico.dataUrl, fit: [500, 280], margin: [0, 0, 0, 12] },
           ],
         }
       : { text: "" };
-  contenido.push({ unbreakable: true, stack: [tituloSeccion("Evolución — " + ind.nombre, 14), cuerpoEvolucion] });
+  contenido.push({ unbreakable: true, stack: [tituloSeccion(NOMBRE_GRAFICO_POR_TIPO[ind.grafico] || NOMBRE_GRAFICO_POR_TIPO.area, 0), cuerpoEvolucion] });
 
-  const tablaTecnicoPdf = (d.vacio || !filasTabla.length)
-    ? { text: "Sin datos por técnico para este indicador con los filtros actuales.", italics: true, color: paleta.text3, fontSize: 9.5, margin: [0, 0, 0, 12] }
+  if (ind.granularidad !== "global") {
+    const tablaTecnicoPdf = (d.vacio || !filasTabla.length)
+      ? sinDatos("Sin datos por técnico con los filtros actuales.")
+      : {
+          table: {
+            headerRows: 1,
+            widths: ["*", "*", "auto", "auto"],
+            dontBreakRows: true,
+            body: [
+              [encabezado("TÉCNICO"), encabezado("COMUNA"), encabezado("VÍNCULO"), encabezado(ind.unidad.toUpperCase(), true)],
+              ...filasTabla.map((f) => [
+                { text: f[0], fontSize: 9.5 },
+                { text: f[1], fontSize: 9.5, color: paleta.text2 },
+                { text: f[2], fontSize: 9.5, color: paleta.text2 },
+                { text: f[3], fontSize: 9.5, bold: true, alignment: "right" },
+              ]),
+            ],
+          },
+          layout: lineasTabla,
+          margin: [0, 0, 0, 14],
+        };
+    contenido.push({ unbreakable: true, stack: [tituloSeccion("Detalle por técnico", 4), tablaTecnicoPdf] });
+  }
+
+  // Detalle por OT: puede ocupar varias páginas, así que no es
+  // "unbreakable"; el encabezado de la tabla se repite en cada página.
+  const ots = filasOt || [];
+  contenido.push(tituloSeccion("Detalle por OT", 4));
+  contenido.push(!ots.length
+    ? sinDatos("Sin OT para este indicador con los filtros actuales.")
     : {
         table: {
           headerRows: 1,
-          widths: ["*", "*", "auto", "auto"],
+          widths: ["auto", "auto", "*", "*", "*", "auto"],
           dontBreakRows: true,
           body: [
-            [
-              { text: "TÉCNICO", fontSize: 8.5, bold: true, color: paleta.text3 },
-              { text: "COMUNA", fontSize: 8.5, bold: true, color: paleta.text3 },
-              { text: "VÍNCULO", fontSize: 8.5, bold: true, color: paleta.text3 },
-              { text: ind.unidad.toUpperCase(), fontSize: 8.5, bold: true, color: paleta.text3, alignment: "right" },
-            ],
-            ...filasTabla.map((f) => [
-              { text: f[0], fontSize: 9.5 },
-              { text: f[1], fontSize: 9.5, color: paleta.text2 },
-              { text: f[2], fontSize: 9.5, color: paleta.text2 },
-              { text: f[3], fontSize: 9.5, bold: true, alignment: "right" },
+            [encabezado("OT"), encabezado("PROGRAMADA"), encabezado("TIPO"), encabezado("COMUNA"), encabezado("TÉCNICO"), encabezado("ESTADO")],
+            ...ots.map((o) => [
+              { text: o.id, fontSize: 9, bold: true },
+              { text: o.fecha.slice(0, 5) + (o.hora ? " " + o.hora : ""), fontSize: 9 },
+              { text: o.tipo, fontSize: 9, color: paleta.text2 },
+              { text: o.comuna || "—", fontSize: 9, color: paleta.text2 },
+              { text: o.tecnico || "—", fontSize: 9 },
+              { text: o.estado, fontSize: 9 },
             ]),
           ],
         },
-        layout: {
-          hLineWidth: (i) => (i === 0 ? 0 : 0.5),
-          vLineWidth: () => 0,
-          hLineColor: () => paleta.border,
-          paddingLeft: () => 8, paddingRight: () => 8, paddingTop: () => 6, paddingBottom: () => 6,
-        },
+        layout: lineasTabla,
         margin: [0, 0, 0, 14],
-      };
-  contenido.push({ unbreakable: true, stack: [tituloSeccion("Detalle por técnico — " + ind.nombre, 4), tablaTecnicoPdf] });
-
-  const definicionIndicador = (i) => ({
-    stack: [
-      { text: i.nombre, fontSize: 11, bold: true, margin: [0, 8, 0, 3] },
-      { text: i.definicion, fontSize: 9.5, margin: [0, 0, 0, 4] },
-      { text: "Fórmula", fontSize: 8, bold: true, color: paleta.text3 },
-      { text: i.formula, fontSize: 9.5, italics: true, margin: [0, 1, 0, 4] },
-      { text: "Unidad", fontSize: 8, bold: true, color: paleta.text3 },
-      { text: i.unidad + "  ·  " + direccionTexto(i), fontSize: 9.5, margin: [0, 1, 0, 4] },
-      { text: "Fuente del dato", fontSize: 8, bold: true, color: paleta.text3 },
-      { text: i.fuente, fontSize: 9.5, margin: [0, 1, 0, 0] },
-    ],
-  });
-  contenido.push({
-    unbreakable: true,
-    stack: [tituloSeccion("Definiciones de los indicadores", 4), definicionIndicador(delGrupo[0])],
-  });
-  delGrupo.slice(1).forEach((i) => {
-    contenido.push({ unbreakable: true, ...definicionIndicador(i) });
-  });
+      });
 
   return {
     pageSize: "LETTER",
@@ -1374,7 +1617,7 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
     pageMargins: [40, 40, 40, 46],
     footer: (paginaActual, totalPaginas) =>
       totalPaginas > 1
-        ? { text: paginaActual + " / " + totalPaginas, alignment: "center", fontSize: 8, color: paleta.text3, margin: [0, 10, 0, 0] }
+        ? { text: ind.sigla + " · " + paginaActual + " / " + totalPaginas, alignment: "center", fontSize: 8, color: paleta.text3, margin: [0, 10, 0, 0] }
         : null,
     content: contenido,
     defaultStyle: { font: "Roboto", fontSize: 10, color: paleta.text },
@@ -1384,14 +1627,14 @@ function construirDocDefinicionPdf({ grupoActivo, grupo, delGrupo, ind, datos, f
 /* ==========================================================================
    11. EXPORTACIÓN A EXCEL
    --------------------------------------------------------------------------
-   Mismo criterio que el PDF: exporta exactamente lo que el usuario tiene en
-   pantalla (categoría activa, indicador elegido, orden de tabla, filtros),
-   no un volcado de toda la base. Tres hojas: indicadores de la categoría
-   activa, serie diaria del indicador elegido (con su gráfico incrustado
+   Mismo criterio que el PDF: solo el indicador elegido, con el período,
+   los filtros y el orden de tabla que hay en pantalla. Cuatro hojas:
+   resumen del indicador (valor, qué mide, fórmula, fuente), serie diaria
+   (con su gráfico incrustado
    como imagen — ExcelJS no arma gráficos nativos de Excel desde el
    navegador sin un backend, así que se reusa el mismo PNG rasterizado que
-   ya construye svgAPng para el PDF) y el detalle por técnico tal como está
-   ordenado en pantalla.
+   ya construye svgAPng para el PDF), el detalle por técnico tal como está
+   ordenado en pantalla y el detalle por OT completo.
    ========================================================================== */
 
 // ExcelJS pide color ARGB (8 hex: alpha + rgb); el sistema de diseño da
@@ -1408,33 +1651,37 @@ function numFmtExcel(formato) {
   }
 }
 
-async function construirLibroExcel({ grupo, delGrupo, ind, datos, imagenGrafico, filasTabla }) {
+async function construirLibroExcel({ ind, datos, filtros, periodoTexto, imagenGrafico, filasTabla, filasOt }) {
   const wb = new window.ExcelJS.Workbook();
   wb.creator = "Control Position";
   wb.created = new Date();
 
-  const colorCategoria = argbExcel((grupo && grupo.color) || "#033E84");
+  const grupoInd = GRUPOS.find((g) => g.id === ind.grupo);
+  const colorCategoria = argbExcel((grupoInd && grupoInd.color) || "#033E84");
   const estiloEncabezado = (ws) => {
     const fila = ws.getRow(1);
     fila.font = { bold: true, color: { argb: "FFFFFFFF" } };
     fila.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colorCategoria } };
   };
 
-  // ---- Hoja 1: indicadores de la categoría activa ----
-  const wsResumen = wb.addWorksheet("Indicadores");
+  // ---- Hoja 1: resumen del indicador elegido (solo ese, no la categoría) ----
+  const dInd = datos[ind.id];
+  const wsResumen = wb.addWorksheet("Resumen");
   wsResumen.columns = [
-    { header: "Indicador", key: "nombre", width: 34 },
-    { header: "Valor", key: "valor", width: 16 },
-    { header: "Dirección", key: "direccion", width: 40 },
+    { header: ind.sigla + " · " + ind.nombre, key: "campo", width: 22 },
+    { header: "", key: "valor", width: 70 },
   ];
-  delGrupo.forEach((i) => {
-    const d = datos[i.id];
-    wsResumen.addRow({
-      nombre: i.nombre,
-      valor: d.vacio ? "—" : formatear(d.valor, i.formato),
-      direccion: d.vacio ? "Sin datos con los filtros actuales" : direccionTexto(i),
-    });
-  });
+  [
+    ["Valor del período", dInd.vacio ? "Sin datos con los filtros actuales" : formatear(dInd.valor, ind.formato) + " (" + (esAcumulable(ind) ? "total" : "promedio") + ")"],
+    ["Lectura", direccionTexto(ind)],
+    ["Período", periodoTexto],
+    ["Filtros", textoFiltrosActivos(filtros)],
+    ["Qué mide", ind.definicion],
+    ["Fórmula", ind.formula],
+    ["Fuente del dato", ind.fuente],
+  ].forEach(([campo, valor]) => wsResumen.addRow({ campo, valor }));
+  wsResumen.getColumn("campo").font = { bold: true };
+  wsResumen.getColumn("valor").alignment = { wrapText: true, vertical: "top" };
   estiloEncabezado(wsResumen);
 
   // ---- Hoja 2: serie diaria del indicador elegido, con el gráfico ----
@@ -1492,6 +1739,26 @@ async function construirLibroExcel({ grupo, delGrupo, ind, datos, imagenGrafico,
   }
   estiloEncabezado(wsDetalle);
 
+  // ---- Hoja 4: detalle por OT — TODAS las OT del indicador elegido con los
+  // filtros actuales (no solo las 25 que se ven en pantalla) ----
+  const wsOt = wb.addWorksheet("Detalle por OT");
+  wsOt.columns = [
+    { header: "OT", key: "id", width: 12 },
+    { header: "Fecha", key: "fecha", width: 12 },
+    { header: "Hora", key: "hora", width: 8 },
+    { header: "Tipo", key: "tipo", width: 22 },
+    { header: "Dirección", key: "direccion", width: 40 },
+    { header: "Comuna", key: "comuna", width: 16 },
+    { header: "Técnico", key: "tecnico", width: 26 },
+    { header: "Estado", key: "estado", width: 14 },
+  ];
+  if (!filasOt || !filasOt.length) {
+    wsOt.addRow({ id: "Sin OT para este indicador con los filtros actuales." });
+  } else {
+    filasOt.forEach((f) => wsOt.addRow(f));
+  }
+  estiloEncabezado(wsOt);
+
   return wb.xlsx.writeBuffer();
 }
 
@@ -1520,6 +1787,8 @@ function DashboardAnalisisScreen() {
 
   const graficoRef = useRef(null);
   const tablaRef = useRef(null);
+  // Lista completa de "Detalle por OT" (la llena HistorialOT), para el Excel.
+  const detalleOtRef = useRef([]);
   const [generandoPdf, setGenerandoPdf] = useState(false);
   const [errorPdf, setErrorPdf] = useState(null);
 
@@ -1543,11 +1812,11 @@ function DashboardAnalisisScreen() {
       const filasTabla = leerFilasTabla(tablaRef);
 
       const docDefinition = construirDocDefinicionPdf({
-        grupoActivo, grupo, delGrupo, ind, datos, filtros,
-        fechaInicioISO, fechaFinISO, imagenGrafico, filasTabla,
+        grupo, ind, datos, filtros,
+        fechaInicioISO, fechaFinISO, imagenGrafico, filasTabla, filasOt: detalleOtRef.current,
       });
 
-      const nombreArchivo = "analisis-" + grupoActivo + "-" + fechaInicioISO + "-al-" + fechaFinISO + ".pdf";
+      const nombreArchivo = "analisis-" + ind.sigla + "-" + fechaInicioISO + "-al-" + fechaFinISO + ".pdf";
       await new Promise((resolve, reject) => {
         try {
           window.pdfMake.createPdf(docDefinition).download(nombreArchivo, resolve);
@@ -1583,9 +1852,9 @@ function DashboardAnalisisScreen() {
       }
       const filasTabla = leerFilasTabla(tablaRef);
 
-      const buffer = await construirLibroExcel({ grupo, delGrupo, ind, datos, imagenGrafico, filasTabla });
+      const buffer = await construirLibroExcel({ ind, datos, filtros, periodoTexto: fechaCompleta(fechaInicioISO) + " al " + fechaCompleta(fechaFinISO), imagenGrafico, filasTabla, filasOt: detalleOtRef.current });
       const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-      const nombreArchivo = "analisis-" + grupoActivo + "-" + fechaInicioISO + "-al-" + fechaFinISO + ".xlsx";
+      const nombreArchivo = "analisis-" + ind.sigla + "-" + fechaInicioISO + "-al-" + fechaFinISO + ".xlsx";
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = nombreArchivo;
@@ -1608,23 +1877,9 @@ function DashboardAnalisisScreen() {
             Período: <b style={{ color: "var(--text)" }}>{textoPeriodo(periodo)}</b>
           </div>
         </div>
-        {/* Botones de descarga y, debajo, el estado de la última carga —
-            a la altura del período. */}
-        <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-          <div className="page-head-actions">
-            {errorExcel && <span style={{ fontSize: 12, color: "var(--red-fg)" }}>{errorExcel}</span>}
-            <button type="button" onClick={descargarExcel} disabled={generandoExcel || cargando} className="btn"
-              style={{ opacity: generandoExcel || cargando ? 0.6 : 1, cursor: generandoExcel || cargando ? "not-allowed" : "pointer" }}>
-              <span className={generandoExcel ? "icon-spin" : ""}><Icon name={generandoExcel ? "refresh" : "download"} /></span>
-              {generandoExcel ? "Generando…" : "Descargar Excel"}
-            </button>
-            {errorPdf && <span style={{ fontSize: 12, color: "var(--red-fg)" }}>{errorPdf}</span>}
-            <button type="button" onClick={descargarPdf} disabled={generandoPdf || cargando} className="btn"
-              style={{ opacity: generandoPdf || cargando ? 0.6 : 1, cursor: generandoPdf || cargando ? "not-allowed" : "pointer" }}>
-              <span className={generandoPdf ? "icon-spin" : ""}><Icon name={generandoPdf ? "refresh" : "download"} /></span>
-              {generandoPdf ? "Generando…" : "Descargar PDF"}
-            </button>
-          </div>
+        {/* Estado de la última carga, a la altura del período. La
+            exportación está junto a las categorías (ver MenuExportar). */}
+        <div style={{ marginLeft: "auto", alignSelf: "flex-end" }}>
           <EstadoServicio servicio={servicio} desglose={desglose} onReintentar={recargar} />
         </div>
       </div>
@@ -1640,7 +1895,12 @@ function DashboardAnalisisScreen() {
           </div>
         ) : (
           <>
-            <BotonesCategoria grupoActivo={grupoActivo} onCambiar={cambiarCategoria} indicadores={visibles} />
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <BotonesCategoria grupoActivo={grupoActivo} onCambiar={cambiarCategoria} indicadores={visibles} />
+              <MenuExportar sigla={ind.sigla} deshabilitado={cargando}
+                generandoExcel={generandoExcel} generandoPdf={generandoPdf} error={errorExcel || errorPdf}
+                onExcel={descargarExcel} onPdf={descargarPdf} />
+            </div>
 
             <div>
               <div className="ind-grid">
@@ -1653,6 +1913,8 @@ function DashboardAnalisisScreen() {
 
             <GraficoPrincipal ind={ind} d={datos[ind.id]} cargando={cargando} graficoRef={graficoRef} periodo={periodo} />
             <TablaTecnicos ind={ind} d={datos[ind.id]} cargando={cargando} tablaRef={tablaRef} periodo={periodo} />
+            <HistorialOT ind={ind} periodo={periodo} filtros={filtros} tecnicos={tecnicos} filasRef={detalleOtRef}
+              recarga={servicio.actualizadoEn ? servicio.actualizadoEn.getTime() : 0} />
           </>
         )}
       </div>
