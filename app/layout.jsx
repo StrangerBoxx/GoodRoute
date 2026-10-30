@@ -63,7 +63,9 @@ function Sidebar({ route, go, counts, open, onClose }) {
       <GoodRouteNavGroup route={route} go={go} />
 
       <div className="nav-group-label">Ajustes</div>
-      <button className={"nav-item" + (route.screen === "settings" ? " active" : "")} onClick={() => go("settings")}>
+      {/* No se marca cuando se entró por GoodRoute → Configuración (misma
+          pantalla, sección del optimizador): ahí el activo es ese ítem. */}
+      <button className={"nav-item" + (route.screen === "settings" && route.params.section !== "optimizador" ? " active" : "")} onClick={() => go("settings")}>
         <Icon name="settings" />
         Configuración
       </button>
