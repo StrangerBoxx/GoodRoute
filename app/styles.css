@@ -833,6 +833,11 @@ a { color: inherit; text-decoration: none; }
 .rx-error-tecnico { opacity: 1; transition: opacity .3s ease, transform .3s ease; }
 .rx-error-tecnico.saliendo { opacity: 0; transform: translateY(-3px); }
 .rx-stop-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+/* HU-38: hora acordada y hora en que el técnico queda libre, una sobre otra */
+.rx-parada-horas { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: none; }
+.rx-parada-libre { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+.rx-excluidos { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.rx-excluido { padding: 8px 6px; }
 /* HU-23: las acciones de cada parada (subir/bajar/mover/quitar) quedan
    atenuadas hasta pasar el mouse o enfocar la fila, para que la lista se
    lea primero como ruta y no como botonera. En pantallas táctiles (sin

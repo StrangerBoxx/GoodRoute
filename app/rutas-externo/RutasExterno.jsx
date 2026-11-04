@@ -151,6 +151,19 @@ function horaVista(hhmm) {
   return hhmm;
 }
 
+// HU-38: hora acordada de la parada y hora en que el técnico queda libre.
+// Sin configuración cargada solo se ve la acordada (ver horaLibreParada).
+function HorasParada({ parada, config }) {
+  if (!parada.horaProgramada) return null;
+  const libre = window.RUTAS_EXTERNO_OPTIMIZER.horaLibreParada(parada, config);
+  return (
+    <div className="rx-parada-horas">
+      <span className="badge b-slate" title="Hora acordada con el cliente"><Icon name="clock" />Acordada {horaVista(parada.horaProgramada)}</span>
+      {libre && <span className="rx-parada-libre" title="Al terminar la estadía reservada: tolerancia posterior + servicio + tiempo de gracia">Libre {horaVista(libre)}</span>}
+    </div>
+  );
+}
+
 // Qué OT cambiaron entre dos versiones de la propuesta (la corrida del
 // optimizador sin editar, o el plan que ya estaba confirmado si se
 // reabrió con "Editar", contra el estado actual) — se usa tanto para la
@@ -1024,7 +1037,7 @@ function ordenarPorHora(paradas) {
 
 // `ordenPorHora` (editando un plan confirmado): sin flechas de subir/bajar,
 // la ruta queda siempre por hora programada.
-function TecnicoRouteDetail({ tecnico, paradas, otrosTecnicos, recalculando, otIdsCambiados, teniaRutaOriginal, errorTecnico, cambios, otrasRutasNombres, ordenPorHora, onMoveUp, onMoveDown, onMover, onEliminar, onRestablecer }) {
+function TecnicoRouteDetail({ tecnico, paradas, config, otrosTecnicos, recalculando, otIdsCambiados, teniaRutaOriginal, errorTecnico, cambios, otrasRutasNombres, ordenPorHora, onMoveUp, onMoveDown, onMover, onEliminar, onRestablecer }) {
   const [menuFor, setMenuFor] = useState(null);
   const [confirmandoReset, setConfirmandoReset] = useState(false);
 
@@ -1143,9 +1156,7 @@ function TecnicoRouteDetail({ tecnico, paradas, otrosTecnicos, recalculando, otI
                 </div>
                 <div className="stop-dir"><Icon name="pin" style={{ width: 12, height: 12 }} />{direccionParada(ot.direccion, tecnico.zona)}</div>
               </div>
-              {ot.horaProgramada && (
-                <span className="badge b-slate" style={{ flex: "none" }}><Icon name="clock" />{horaVista(ot.horaProgramada)}</span>
-              )}
+              <HorasParada parada={ot} config={config} />
               <div className="rx-stop-actions">
                 {/* Deshabilitados mientras esta ruta se está recalculando
                     (ver "Actualizando…" arriba) — sin esto, apretar varias
@@ -1239,6 +1250,32 @@ function PendienteRow({ ot, tecnicos, onMover, cambiada, deshabilitado }) {
   );
 }
 
+/* ---- Técnicos que la corrida dejó fuera, con su causa (HU-38) ---- */
+function TecnicosExcluidos({ tecnicos }) {
+  return (
+    <div className="rx-excluidos">
+      <div className="rx-card-head">
+        <div className="rx-card-title row-flex" style={{ gap: 7 }}>
+          <Icon name="techs" style={{ width: 16, height: 16, color: "var(--amber-fg)" }} />
+          Técnicos excluidos
+        </div>
+        <Badge cls="b-amber" dot={false}>{tecnicos.length}</Badge>
+      </div>
+      {tecnicos.map(t => (
+        <div key={t.id} className="rx-excluido">
+          <div className="cell-strong">{t.nombre}</div>
+          {t.causa && (
+            <div className="stop-dir" style={{ color: "var(--amber-fg)", alignItems: "flex-start" }}>
+              <Icon name="alert" style={{ width: 12, height: 12, marginTop: 2, flex: "none" }} />
+              <span>{t.causa}</span>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ---- Encabezado de la verificación (HU-31): el día que se está
    planificando como texto destacado (en vez de la tira de días, que acá
    solo se prestaba a cambiar de día sin querer), con "<" a la izquierda
@@ -1300,7 +1337,7 @@ function ResumenCorrida({ resumen }) {
 }
 
 /* ---- Panel de propuesta + edición + confirmación (HU-02/HU-03) ---- */
-function PropuestaPanel({ propuesta, propuestaOriginal, error, recalculando, erroresTecnico, confirmando, onMoveUp, onMoveDown, onMover, onEliminar, onMoverPendiente, onConfirmar, onRestablecerRuta, esReedicion, motivosPorOt, confirmadoPrevioPorTecnico }) {
+function PropuestaPanel({ propuesta, propuestaOriginal, config, tecnicosExcluidos, error, recalculando, erroresTecnico, confirmando, onMoveUp, onMoveDown, onMover, onEliminar, onMoverPendiente, onConfirmar, onRestablecerRuta, esReedicion, motivosPorOt, confirmadoPrevioPorTecnico }) {
   // Cuánto lleva YA cada técnico contando TAMBIÉN lo que quedó confirmado
   // en una ronda anterior de este mismo día (ej. el optimizador dejó 13
   // asignadas y ahora se están asignando a mano las 5 que quedaron
@@ -1412,7 +1449,7 @@ function PropuestaPanel({ propuesta, propuestaOriginal, error, recalculando, err
             const cambios = cambiosPorTecnico[selectedTecId];
             const otrasRutasNombres = (cambios?.otrasRutasAfectadas || []).map(id => propuesta.porTecnico[id]?.tecnico.nombre).filter(Boolean);
             return (
-              <TecnicoRouteDetail tecnico={tecnico} paradas={paradas} otrosTecnicos={otros} ordenPorHora={esReedicion}
+              <TecnicoRouteDetail tecnico={tecnico} paradas={paradas} config={config} otrosTecnicos={otros} ordenPorHora={esReedicion}
                 recalculando={!!(recalculando && recalculando[selectedTecId])} otIdsCambiados={otIdsCambiados}
                 teniaRutaOriginal={!!teniaRutaOriginalPorTecnico[selectedTecId]}
                 errorTecnico={erroresTecnico && erroresTecnico[selectedTecId]}
@@ -1447,6 +1484,7 @@ function PropuestaPanel({ propuesta, propuestaOriginal, error, recalculando, err
             ))}
           </div>
         )}
+        {tecnicosExcluidos && tecnicosExcluidos.length > 0 && <TecnicosExcluidos tecnicos={tecnicosExcluidos} />}
       </div>
 
       <div className="rx-actions" style={{ justifyContent: "flex-end", marginTop: 16 }}>
@@ -1544,9 +1582,10 @@ function MapaRuta({ base, paradas, geometria }) {
 // edición acá, es historial. El trazado se pide bajo demanda (botón "Ver
 // en mapa"): no tiene sentido llamar a /ruteo/geometria para las 7+ rutas
 // del día si la planificadora solo quiere mirar una.
-function RegistroRutaCard({ ruta }) {
+function RegistroRutaCard({ ruta, config }) {
   const paradas = (ruta.paradas || ruta.ordenes_asignadas || []).map((p, i) => ({
     id: p.ot_id || p.id || `parada-${i}`,
+    tipo: p.tipo,
     direccion: p.direccion,
     calle: p.calle || p.direccion,
     comuna: p.comuna || null,
@@ -1632,7 +1671,7 @@ function RegistroRutaCard({ ruta }) {
                   <span className="id-pill">{p.id}</span>
                   {p.direccion && <div className="stop-dir"><Icon name="pin" style={{ width: 12, height: 12 }} />{direccionParada(p.direccion, zona)}</div>}
                 </div>
-                {p.horaProgramada && <span className="badge b-slate" style={{ flex: "none" }}><Icon name="clock" />{horaVista(p.horaProgramada)}</span>}
+                <HorasParada parada={p} config={config} />
               </div>
             ))}
           </div>
@@ -1678,7 +1717,7 @@ function RegistroRutaCard({ ruta }) {
 // confunde con "no hay registros"). Antes era una pantalla aparte con su
 // propia tira de días. `recarga` cambia después de cada confirmación, para
 // volver a consultar.
-function RutasConfirmadasDia({ fecha, recarga, error: avisoError, puedeEditar, onEditar, onDescartar }) {
+function RutasConfirmadasDia({ fecha, recarga, config, error: avisoError, puedeEditar, onEditar, onDescartar }) {
   const [estado, setEstado] = useState("cargando"); // cargando | ok | error
   const [rutas, setRutas] = useState([]);
   const [error, setError] = useState(null);
@@ -1759,7 +1798,7 @@ function RutasConfirmadasDia({ fecha, recarga, error: avisoError, puedeEditar, o
           <div className="empty"><Icon name="inbox" />No hay rutas confirmadas para el {fechaDDMMYYYY(fecha)}.</div>
         )}
         {estado === "ok" && rutasConParadas.length > 0 && (
-          rutasConParadas.map((r, i) => <RegistroRutaCard key={r.tecnico_id || i} ruta={r} />)
+          rutasConParadas.map((r, i) => <RegistroRutaCard key={r.tecnico_id || i} ruta={r} config={config} />)
         )}
       </div>
     </>
@@ -2268,6 +2307,9 @@ function RutasExternoScreen({ onToast, go, route }) {
         totalTecnicos: r.total_tecnicos, tecnicosUtilizados: r.tecnicos_utilizados,
         distanciaTotalKm: r.distancia_total_km, fuenteMatriz: r.fuente_matriz,
         pendientesPorCausa: r.pendientes_por_causa || null,
+        // HU-38: nombre y forma provisionales, los define la HU-35 (todavía
+        // no publicada). Sin ese campo, simplemente no se muestra el bloque.
+        tecnicosExcluidos: (resultado.tecnicos_excluidos || []).map(t => ({ id: t.tecnico_id, nombre: t.nombre || t.tecnico_id, causa: t.causa })),
       });
       setPropuesta({ porTecnico, pendientes });
       // Snapshot SIN editar, para poder armar ruta_propuesta/modificaciones
@@ -2974,7 +3016,7 @@ function RutasExternoScreen({ onToast, go, route }) {
       )}
 
       {etapa === "seleccion" && pestana === "confirmadas" ? (
-        <RutasConfirmadasDia fecha={fecha} recarga={recargaOts} error={error}
+        <RutasConfirmadasDia fecha={fecha} recarga={recargaOts} config={configNegocio} error={error}
           puedeEditar={confirmadasDelDia > 0} onEditar={() => onEditarConfirmado(fecha)}
           onDescartar={setPlanADescartar} />
       ) : cargando ? (
@@ -2990,7 +3032,7 @@ function RutasExternoScreen({ onToast, go, route }) {
           onAsignacionManual={onAsignacionManual}
           optimizando={optimizando} error={error} />
       ) : (
-        <PropuestaPanel propuesta={propuesta} propuestaOriginal={propuestaOriginal} error={error} recalculando={recalculando} erroresTecnico={erroresTecnico} confirmando={confirmando}
+        <PropuestaPanel propuesta={propuesta} propuestaOriginal={propuestaOriginal} config={configNegocio} tecnicosExcluidos={resumen?.tecnicosExcluidos} error={error} recalculando={recalculando} erroresTecnico={erroresTecnico} confirmando={confirmando}
           onMoveUp={onMoveUp} onMoveDown={onMoveDown} onMover={onMover} onEliminar={onEliminar}
           onMoverPendiente={onMoverPendiente} onRestablecerRuta={onRestablecerRuta}
           onConfirmar={onConfirmar}

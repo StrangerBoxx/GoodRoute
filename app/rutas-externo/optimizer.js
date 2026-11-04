@@ -120,6 +120,19 @@
     return { antes: config?.tolerancia_antes_min ?? unica, despues: config?.tolerancia_despues_min ?? unica };
   }
 
+  // Hora en que el técnico queda libre de una parada (HU-34/38): termina la
+  // estadía reservada, que parte en la hora acordada y dura la tolerancia
+  // posterior + el servicio del tipo de OT + el tiempo de gracia. No depende
+  // del orden de la ruta, así que sigue siendo válida al editar a mano.
+  // `tiempo_gracia_min` es el nombre provisional del parámetro de la HU-34,
+  // que todavía no está publicado; mientras tanto vale su default (5 min).
+  function horaLibreParada(parada, config) {
+    const acordadaMin = hhmmAMin(parada.horaProgramada);
+    if (acordadaMin == null || !config) return null;
+    const servicio = config.tiempos_servicio_por_tipo?.[parada.tipo] ?? config.tiempo_servicio_default ?? 30;
+    return minAHhmm(acordadaMin + toleranciasVentana(config).despues + servicio + (config.tiempo_gracia_min ?? 5));
+  }
+
   // `violaciones` acá son las restricciones "obvias" que la coordinadora
   // pidió aplicar al editar a mano: capacidad máxima del técnico y que la
   // ruta no termine después del fin de jornada ni haga llegar una OT
@@ -194,5 +207,5 @@
     return { paradas: paradasActualizadas, resumen, violaciones: evaluarViolaciones(paradasActualizadas, capacidadMax, clock, finJornadaMin) };
   }
 
-  window.RUTAS_EXTERNO_OPTIMIZER = { validarConfirmacion, calcularLlegadas, haversineKm, minAHhmm, recalcularResumenRuta, toleranciasVentana };
+  window.RUTAS_EXTERNO_OPTIMIZER = { validarConfirmacion, calcularLlegadas, haversineKm, minAHhmm, recalcularResumenRuta, toleranciasVentana, horaLibreParada };
 })();

@@ -20,21 +20,50 @@ const GRUPO_LABEL = {
 // ajustar la operación); el resto conserva el orden del catálogo.
 const GRUPOS_PRIMERO = ["jornada"];
 
+const ORIGEN_LABEL = {
+  operacion_cliente: "Operación del cliente",
+  supuesto_equipo: "Supuesto del equipo",
+};
+
+// HU-38: de dónde sale cada valor. Los parámetros por tipo de OT traen su
+// origen por clave (origen_por_clave), ahí el nivel general no dice nada.
+function OrigenParametro({ origen, fuente, compacto }) {
+  if (!origen) return null;
+  const label = ORIGEN_LABEL[origen] || origen;
+  return (
+    <div className="cell-muted" style={{ fontSize: 11, marginTop: 5 }} title={compacto ? fuente : undefined}>
+      Origen: {label}{!compacto && fuente ? ` · ${fuente}` : ""}
+    </div>
+  );
+}
+
+// Parámetros de valores fijos (inicio de la jornada, HU-34): `opciones` es el
+// nombre provisional en el catálogo, hasta que se publique esa HU.
+const opcionParametro = o => (o !== null && typeof o === "object") ? o : { valor: o, etiqueta: String(o) };
+
 function CampoParametro({ param, valor, onChange, error }) {
-  const { etiqueta, descripcion, tipo, unidad, minimo, maximo } = param;
+  const { etiqueta, descripcion, tipo, unidad, minimo, maximo, origen, fuente, origen_por_clave } = param;
   const esAncho = tipo === "dict_int";
+  const opciones = param.opciones ? param.opciones.map(opcionParametro) : null;
   return (
     <div className={"field" + (error ? " missing" : "") + (esAncho ? " field-full" : "")}>
       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 3 }}>{etiqueta}</div>
       {descripcion && <div className="cell-muted" style={{ fontSize: 11.5, marginBottom: 7 }}>{descripcion}</div>}
 
-      {tipo === "bool" && (
+      {opciones && (
+        <select className="field-input" style={{ fontFamily: "inherit" }} value={String(valor)}
+          onChange={(e) => onChange(opciones.find(o => String(o.valor) === e.target.value).valor)}>
+          {opciones.map(o => <option key={String(o.valor)} value={String(o.valor)}>{o.etiqueta}</option>)}
+        </select>
+      )}
+
+      {!opciones && tipo === "bool" && (
         <button type="button" className={"toggle" + (valor ? " on" : "")} onClick={() => onChange(!valor)}>
           <span className="knob" />
         </button>
       )}
 
-      {(tipo === "int" || tipo === "float") && (
+      {!opciones && (tipo === "int" || tipo === "float") && (
         <div className="row-flex" style={{ gap: 8 }}>
           <input className="field-input" type="number" value={valor}
             min={minimo != null ? minimo : undefined} max={maximo != null ? maximo : undefined}
@@ -44,7 +73,7 @@ function CampoParametro({ param, valor, onChange, error }) {
         </div>
       )}
 
-      {tipo === "str" && (
+      {!opciones && tipo === "str" && (
         <input className="field-input" type="text" value={valor || ""} onChange={(e) => onChange(e.target.value)} />
       )}
 
@@ -55,14 +84,16 @@ function CampoParametro({ param, valor, onChange, error }) {
               <div className="field-label">{window.RUTAS_EXTERNO_API.TIPO_OT_LABEL[clave] || clave}</div>
               <input className="field-input" type="number" value={v}
                 onChange={(e) => onChange({ ...valor, [clave]: e.target.value === "" ? "" : parseInt(e.target.value, 10) })} />
+              {origen_por_clave?.[clave] && <OrigenParametro origen={origen_por_clave[clave].origen} fuente={origen_por_clave[clave].fuente} compacto />}
             </div>
           ))}
         </div>
       )}
 
-      {(minimo != null || maximo != null) && (tipo === "int" || tipo === "float") && (
+      {!opciones && (minimo != null || maximo != null) && (tipo === "int" || tipo === "float") && (
         <div className="cell-muted" style={{ fontSize: 11, marginTop: 5 }}>Rango permitido: {minimo} – {maximo}{unidad ? ` ${unidad}` : ""}</div>
       )}
+      {!origen_por_clave && <OrigenParametro origen={origen} fuente={fuente} />}
       {error && <div style={{ color: "var(--red-fg)", fontSize: 11.5, marginTop: 5 }}>{error}</div>}
     </div>
   );
