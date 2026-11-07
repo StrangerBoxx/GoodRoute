@@ -1,0 +1,37 @@
+/* ============ Pantallas de error ============
+   La página 404 no está acá: GitHub Pages solo la busca en la raíz
+   (/404.html), y lleva sus estilos adentro porque se sirve en cualquier
+   dirección, también dentro de subcarpetas. */
+
+/* ---- Arranque: "Cargando…", carga fallida (arranque.js) y sin JavaScript
+   (<noscript> en index.html). Colores fijos, sin las variables de
+   styles.css: tienen que verse aunque styles.css no haya cargado. ---- */
+.boot { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: #FBF6F6; font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif; color: #1c1a1b; }
+.boot-card { width: 100%; max-width: 440px; background: #fff; border: 1px solid #ece4e4; border-radius: 16px; padding: 32px 28px 28px; box-shadow: 0 2px 8px rgba(40,30,30,.06); text-align: center; }
+.boot-logo { height: 36px; width: auto; display: block; margin: 0 auto 22px; }
+.boot-ring { width: 26px; height: 26px; margin: 4px auto 12px; border-radius: 50%; border: 3px solid #e3ebf5; border-top-color: #033E84; animation: boot-giro .8s linear infinite; }
+@keyframes boot-giro { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .boot-ring { animation-duration: 2.4s; } }
+.boot-icon { width: 44px; height: 44px; border-radius: 50%; background: #fbe3df; color: #9c2f23; display: grid; place-items: center; margin: 0 auto 14px; font-weight: 700; font-size: 20px; }
+.boot-title { font-size: 17px; font-weight: 650; margin: 0; }
+.boot-text { font-size: 13.5px; line-height: 1.55; color: #635f60; margin: 8px 0 20px; }
+.boot-muted { font-size: 13px; color: #938d8e; margin: 0; }
+.boot-btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 16px; border-radius: 9px; border: 0; background: #033E84; color: #fff; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.boot-btn:hover { background: #022c5f; }
+.boot-detail { margin-top: 20px; text-align: left; font-size: 12px; color: #938d8e; }
+.boot-detail summary { cursor: pointer; width: fit-content; margin: 0 auto; }
+.boot-detail pre { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; background: #f8f3f3; border: 1px solid #ece4e4; border-radius: 8px; padding: 10px 12px; margin: 10px 0 0; color: #635f60; }
+
+/* ---- Error boundary (ErrorBoundary.jsx): pantalla que falló al dibujarse,
+   o la app entera. Ya con la app montada: usa las variables de styles.css. ---- */
+.error-fallback { max-width: 520px; margin: 40px auto; text-align: center; }
+.error-fallback-page { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: var(--bg); }
+.error-fallback-page .error-fallback { margin: 0; width: 100%; }
+.error-fallback-icon { width: 44px; height: 44px; border-radius: 50%; background: var(--red-bg); color: var(--red-fg); display: grid; place-items: center; margin: 0 auto 14px; }
+.error-fallback-icon svg { width: 22px; height: 22px; }
+.error-fallback-title { font-size: 17px; font-weight: 650; }
+.error-fallback-text { font-size: 13.5px; line-height: 1.55; color: var(--text-2); margin: 8px 0 20px; }
+.error-fallback-actions { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.error-fallback-detail { margin-top: 20px; text-align: left; font-size: 12px; color: var(--text-3); }
+.error-fallback-detail summary { cursor: pointer; width: fit-content; margin: 0 auto; }
+.error-fallback-detail pre { font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 10px 0 0; color: var(--text-2); }

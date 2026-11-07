@@ -11,9 +11,32 @@
   <!-- Mapa de la ruta (Asignación de rutas → Asignaciones registradas): Leaflet + mosaicos de OpenStreetMap, sin API key. -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
   <link rel="stylesheet" href="app/styles.css" />
+  <!-- Pantallas de error: app/errores/. arranque.js va primero que todo,
+       para detectar si la app no llega a montar; el marcado de "Cargando…"
+       y de <noscript> tiene que quedar acá, en el HTML. -->
+  <link rel="stylesheet" href="app/errores/errores.css" />
+  <script src="app/errores/arranque.js"></script>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <div class="boot" id="boot-carga" role="status">
+      <div class="boot-card">
+        <img class="boot-logo" src="app/logo-control_position.svg" alt="Control Position" />
+        <div class="boot-ring" aria-hidden="true"></div>
+        <p class="boot-muted">Cargando…</p>
+      </div>
+    </div>
+  </div>
+  <noscript>
+    <style>#boot-carga { display: none; }</style>
+    <div class="boot">
+      <div class="boot-card">
+        <img class="boot-logo" src="app/logo-control_position.svg" alt="Control Position" />
+        <p class="boot-title">Esta aplicación necesita JavaScript</p>
+        <p class="boot-text">Activa JavaScript en tu navegador y vuelve a cargar la página para usar el back office.</p>
+      </div>
+    </div>
+  </noscript>
 
   <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
@@ -37,6 +60,7 @@
   <script src="app/rutas-externo/data.js"></script>
   <script src="app/rutas-externo/optimizer.js"></script>
   <script type="text/babel" src="app/ui.jsx"></script>
+  <script type="text/babel" src="app/errores/ErrorBoundary.jsx"></script>
   <script type="text/babel" src="app/rutas-externo/RutasExterno.jsx"></script>
   <script type="text/babel" src="app/rutas-externo/configuracion.jsx"></script>
   <script type="text/babel" src="app/auth.jsx"></script>

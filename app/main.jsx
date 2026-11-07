@@ -199,7 +199,7 @@ function App() {
       <Sidebar route={route} go={go} counts={counts} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="main">
         <TopBar query={query} setQuery={setQuery} go={go} onLogout={() => { setAuthed(false); }} onMenuClick={() => setSidebarOpen(true)} />
-        <div className="scroll">{content}</div>
+        <div className="scroll"><ErrorBoundary resetKey={route}>{content}</ErrorBoundary></div>
       </div>
       {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
       {evidenceOT && <EvidenceModal ot={ordenes.find(o => o.id === evidenceOT)} onClose={() => setEvidenceOT(null)} go={go} />}
@@ -224,4 +224,4 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary pantallaCompleta><App /></ErrorBoundary>);
