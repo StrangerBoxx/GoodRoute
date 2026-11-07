@@ -37,23 +37,28 @@ function OrigenParametro({ origen, fuente, compacto }) {
   );
 }
 
-// Parámetros de valores fijos (inicio de la jornada, HU-34): `opciones` es el
-// nombre provisional en el catálogo, hasta que se publique esa HU.
-const opcionParametro = o => (o !== null && typeof o === "object") ? o : { valor: o, etiqueta: String(o) };
+// Parámetros de valores fijos (tipo "enum", ej. inicio_jornada_modo de la
+// HU-34, optimizador v3.2.0): el catálogo trae `opciones` como objeto
+// { valor: descripción }. Con cualquier otra forma no se arma el selector —
+// se valida antes de usarlo, porque un formato inesperado (una lista, al
+// principio) rompía la pantalla entera.
+function opcionesParametro(opciones) {
+  if (!opciones || typeof opciones !== "object" || Array.isArray(opciones)) return null;
+  return Object.entries(opciones).map(([valor, etiqueta]) => ({ valor, etiqueta: String(etiqueta) }));
+}
 
 function CampoParametro({ param, valor, onChange, error }) {
   const { etiqueta, descripcion, tipo, unidad, minimo, maximo, origen, fuente, origen_por_clave } = param;
   const esAncho = tipo === "dict_int";
-  const opciones = param.opciones ? param.opciones.map(opcionParametro) : null;
+  const opciones = opcionesParametro(param.opciones);
   return (
     <div className={"field" + (error ? " missing" : "") + (esAncho ? " field-full" : "")}>
       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 3 }}>{etiqueta}</div>
       {descripcion && <div className="cell-muted" style={{ fontSize: 11.5, marginBottom: 7 }}>{descripcion}</div>}
 
       {opciones && (
-        <select className="field-input" style={{ fontFamily: "inherit" }} value={String(valor)}
-          onChange={(e) => onChange(opciones.find(o => String(o.valor) === e.target.value).valor)}>
-          {opciones.map(o => <option key={String(o.valor)} value={String(o.valor)}>{o.etiqueta}</option>)}
+        <select className="field-input" style={{ fontFamily: "inherit" }} value={valor ?? ""} onChange={(e) => onChange(e.target.value)}>
+          {opciones.map(o => <option key={o.valor} value={o.valor}>{o.etiqueta}</option>)}
         </select>
       )}
 
