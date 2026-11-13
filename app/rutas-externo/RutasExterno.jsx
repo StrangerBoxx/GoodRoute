@@ -1915,7 +1915,9 @@ function RutasExternoScreen({ onToast, go, route }) {
   // Mapa fecha (ISO) -> plan confirmado de ese día. Cada día se confirma y
   // se edita por separado; todos los planes confirmados se muestran a la vez,
   // sin importar qué día esté elegido en el selector de planificación.
-  const [confirmados, setConfirmados] = useState(() => rxLoad(RX_KEYS.confirmados, {}));
+  // La API es la única fuente de verdad de lo confirmado: NO se lee de sessionStorage
+  // (si no, tras un reset se siguen viendo las confirmaciones anteriores).
+  const [confirmados, setConfirmados] = useState({});
 
   // El punto verde "N confirmadas" de la tira de días (y el distintivo
   // en el resumen del día, ver TiraDias) hasta ahora solo
@@ -1936,18 +1938,30 @@ function RutasExternoScreen({ onToast, go, route }) {
   // limitación ya conocida de "Rutas confirmadas". Si el backend no
   // tiene nada, o falla, el día simplemente no muestra el punto verde —
   // no es un error que haya que mostrar.
+  // La API manda: cada vez que se carga la pantalla, se cambia de día o se
+  // confirma algo (recargaOts), `confirmados` se RECONCILIA con lo que
+  // devuelve GoodRoute. Los días que la API ya no tiene confirmados (ej. tras
+  // /api/reset) desaparecen; los que sí tiene se reconstruyen desde la API.
+  // Solo se conserva la versión local de un día si tiene exactamente las
+  // mismas OT que la API (así no se pierden coordenadas/resumen de ruta
+  // que la API no entrega para "Editar plan").
   useEffect(() => {
     let activo = true;
     window.RUTAS_EXTERNO_API.obtenerAsignacionesConfirmadasPorFecha().then(porFecha => {
       if (!activo) return;
       const { TIPO_OT_LABEL, colorPorId } = window.RUTAS_EXTERNO_API;
       setConfirmados(prev => {
-        let cambio = false;
-        const next = { ...prev };
+        const next = {};
         Object.entries(porFecha).forEach(([f, rutas]) => {
-          if (next[f]) return; // esa fecha ya tiene una versión completa de esta sesión — no la pisa
           const conParadas = (rutas || []).filter(r => (r.paradas || []).length > 0);
           if (conParadas.length === 0) return;
+          const idsApi = new Set(conParadas.flatMap(r => r.paradas.map(p => p.ot_id)));
+          const local = prev[f];
+          const idsLocal = local
+            ? new Set(Object.values(local.porTecnico).flatMap(({ paradas }) => paradas.map(p => p.id)))
+            : null;
+          const iguales = idsLocal && idsLocal.size === idsApi.size && [...idsApi].every(id => idsLocal.has(id));
+          if (iguales) { next[f] = local; return; }
           const porTecnico = {};
           conParadas.forEach(r => {
             porTecnico[r.tecnico_id] = {
@@ -1959,13 +1973,13 @@ function RutasExternoScreen({ onToast, go, route }) {
             };
           });
           next[f] = { porTecnico, fecha: f, generadoEn: null };
-          cambio = true;
         });
-        return cambio ? next : prev;
+        return next;
       });
     }).catch(() => {});
     return () => { activo = false; };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fecha, recargaOts]);
 
   const [error, setError] = useState(null);
   const [optimizando, setOptimizando] = useState(false);
@@ -2111,7 +2125,6 @@ function RutasExternoScreen({ onToast, go, route }) {
   useEffect(() => rxSave(RX_KEYS.propuesta, propuesta), [propuesta]);
   useEffect(() => rxSave(RX_KEYS.propuestaOriginal, propuestaOriginal), [propuestaOriginal]);
   useEffect(() => rxSave(RX_KEYS.generadoEn, generadoEn), [generadoEn]);
-  useEffect(() => rxSave(RX_KEYS.confirmados, confirmados), [confirmados]);
 
   // Cualquier cambio en la selección cuenta como primera interacción de
   // la sesión de planificación (HU-30, ver marcarInicioPlanificacion).
